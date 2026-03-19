@@ -6,21 +6,25 @@ from sqlalchemy.orm import Session
 from sqlalchemy import func
 from models import School, Student, Facility, Teacher
 import os
-import joblib
-import pandas as pd
 
 # Load ML Model if available
 MODEL_PATH = os.path.join(os.path.dirname(__file__), "ml", "dropout_model.pkl")
 ml_model = None
 
 try:
+    import joblib
+    import pandas as pd
+    
     if os.path.exists(MODEL_PATH):
         ml_model = joblib.load(MODEL_PATH)
         print(f"[AI Service] Successfully loaded ML model from {MODEL_PATH}")
     else:
         print("[AI Service] ML model not found. Using heuristic fallback.")
+except ImportError as e:
+    print(f"[AI Service] ML dependencies not found ({e}). Using heuristic fallback.")
 except Exception as e:
     print(f"[AI Service] Error loading ML model: {e}. Using heuristic fallback.")
+
 
 
 # ═══════════════════════════════════════════════════════════

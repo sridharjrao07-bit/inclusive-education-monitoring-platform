@@ -1,0 +1,8 @@
+school_name,district,state,school_type,board,medium,has_ramps,has_braille_materials,has_special_educator,has_computer_lab,has_library,student_name,gender,category,disability_type,socio_economic,attendance_rate,grade_level,academic_score
+"Govt. Primary School, Bhopal",Bhopal,Madhya Pradesh,Urban,CBSE,Hindi,Yes,No,Yes,Yes,Yes,Ravi Kumar,Male,OBC,None,Middle,82.5,5,67.0
+"Govt. Primary School, Bhopal",Bhopal,Madhya Pradesh,Urban,CBSE,Hindi,Yes,No,Yes,Yes,Yes,Priya Sharma,Female,General,Visual,Lower,71.0,5,55.0
+"Govt. High School, Indore",Indore,Madhya Pradesh,Urban,State Board,Hindi,No,No,No,Yes,Yes,Amit Patel,Male,SC,None,BPL,65.3,8,42.0
+"Sarvodaya Vidyalaya, Gaya",Gaya,Bihar,Rural,State Board,Hindi,No,No,No,No,No,Sunita Devi,Female,ST,Locomotor,BPL,45.0,3,38.0
+"Sarvodaya Vidyalaya, Gaya",Gaya,Bihar,Rural,State Board,Hindi,No,No,No,No,No,Rohan Yadav,Male,OBC,None,Lower,58.2,4,51.0
+"KV No.1, Lucknow",Lucknow,Uttar Pradesh,Urban,CBSE,English,Yes,Yes,Yes,Yes,Yes,Ananya Gupta,Female,General,None,Upper,95.0,10,88.5
+"KV No.1, Lucknow",Lucknow,Uttar Pradesh,Urban,CBSE,English,Yes,Yes,Yes,Yes,Yes,Vikram Singh,Male,General,None,Middle,89.0,10,76.0

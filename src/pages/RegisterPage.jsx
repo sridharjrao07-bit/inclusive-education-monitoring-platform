@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
-import { GraduationCap, Eye, EyeOff, UserPlus, AlertCircle, CheckCircle } from 'lucide-react';
+import { GraduationCap, Eye, EyeOff, UserPlus, AlertCircle, CheckCircle, Search, School } from 'lucide-react';
+import axios from 'axios';
+
+const backendURL = import.meta.env.VITE_API_URL || '';
 
 export default function RegisterPage() {
   const { register } = useAuth();
@@ -17,6 +20,8 @@ export default function RegisterPage() {
   // School selection logic
   const [schoolAction, setSchoolAction] = useState('join'); // 'join' or 'new'
   const [schoolCode, setSchoolCode] = useState('');
+  const [verifiedSchool, setVerifiedSchool] = useState(null); // result from verify-code
+  const [verifyingCode, setVerifyingCode] = useState(false);
   
   // New School info
   const [newSchoolName, setNewSchoolName] = useState('');
@@ -27,7 +32,25 @@ export default function RegisterPage() {
   // UI State
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
-  const [successInfo, setSuccessInfo] = useState(null); // To show completion modal
+  const [successInfo, setSuccessInfo] = useState(null);
+
+  // Verify a school code against the backend
+  const handleVerifyCode = async () => {
+    if (!schoolCode || schoolCode.length < 4) return;
+    setVerifyingCode(true);
+    setVerifiedSchool(null);
+    setError('');
+    try {
+      const authBase = backendURL ? `${backendURL}/auth` : '/auth';
+      const res = await axios.get(`${authBase}/verify-code/${schoolCode}`);
+      setVerifiedSchool(res.data);
+    } catch {
+      setVerifiedSchool(null);
+      setError('Invalid school code. Please check and try again.');
+    } finally {
+      setVerifyingCode(false);
+    }
+  };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -38,9 +61,19 @@ export default function RegisterPage() {
       username,
       email,
       password,
-      role: role === 'admin' ? 'national_admin' : 'teacher',
+      role: role === 'admin' ? 'national_admin' : role,
       state: null,
     };
+
+    if (role === 'student') {
+      // Students must always join an existing school
+      if (!schoolCode) {
+        setError('Please provide your School Registration Code to join.');
+        setLoading(false);
+        return;
+      }
+      payload.school_code = schoolCode;
+    }
 
     if (role === 'teacher') {
       if (schoolAction === 'join') {
@@ -68,9 +101,8 @@ export default function RegisterPage() {
     try {
       const res = await register(payload);
       
-      // If a school was just created, show the code so they can write it down
       if (res.createdSchoolCode) {
-        setSuccessInfo({ code: res.createdSchoolCode });
+        setSuccessInfo({ code: res.createdSchoolCode, role });
       } else {
         navigate('/');
       }
@@ -81,20 +113,31 @@ export default function RegisterPage() {
     }
   };
 
-  // SUCCESS OVERLAY (When a new school is registered)
+  // SUCCESS OVERLAY
   if (successInfo) {
     return (
       <div className="auth-container">
         <div className="auth-card text-center">
           <CheckCircle size={48} className="text-neem-500 mx-auto mb-4" />
-          <h2 className="text-xl font-bold text-slate-800 tracking-tight">School Registered Successfully!</h2>
+          <h2 className="text-xl font-bold text-slate-800 tracking-tight">
+            {successInfo.role === 'teacher' && schoolAction === 'new'
+              ? 'School Registered Successfully!'
+              : 'Registration Successful!'}
+          </h2>
           <p className="mt-4 text-sm text-slate-500 leading-relaxed max-w-sm mx-auto">
-            Your school has been created on the platform. Please save this unique Registration Code. 
-            Other teachers and students will need this code to join your school instance.
+            {successInfo.role === 'teacher' && schoolAction === 'new'
+              ? 'Your school has been created. Share this unique code with teachers and students who need to join your school.'
+              : 'You have successfully joined the school. Save this code for reference — share it with others who need to join.'}
           </p>
-          <div className="bg-slate-50 p-5 my-6 rounded-xl border border-dashed border-slate-300 text-3xl tracking-[4px] font-extrabold text-india-600">
-            {successInfo.code}
+          <div className="bg-slate-50 p-5 my-6 rounded-xl border border-dashed border-slate-300">
+            <p className="text-[11px] text-slate-400 uppercase tracking-wider mb-2 font-semibold">Your School Code</p>
+            <div className="text-3xl tracking-[4px] font-extrabold text-india-600">
+              {successInfo.code}
+            </div>
           </div>
+          <p className="text-[12px] text-slate-400 mb-4">
+            ⚠️ Please save this code. Teachers and students will use it to join this school.
+          </p>
           <button 
             className="btn btn-primary w-full py-3 text-[14px]" 
             onClick={() => navigate('/')}
@@ -105,6 +148,45 @@ export default function RegisterPage() {
       </div>
     );
   }
+
+  // Code input with verify button (shared between student and teacher-join flows)
+  const renderCodeInput = () => (
+    <div className="form-group">
+      <label className="form-label">School Registration Code</label>
+      <div className="flex gap-2">
+        <input 
+          className="form-input flex-1"
+          type="text" 
+          placeholder="e.g. A1B2C3D4" 
+          value={schoolCode} 
+          onChange={e => {
+            setSchoolCode(e.target.value.toUpperCase());
+            setVerifiedSchool(null);
+          }}
+          maxLength={8}
+        />
+        <button
+          type="button"
+          className="btn btn-primary px-4 py-2 text-[13px] flex items-center gap-1.5 whitespace-nowrap"
+          style={{ minWidth: 'auto' }}
+          onClick={handleVerifyCode}
+          disabled={verifyingCode || schoolCode.length < 4}
+        >
+          {verifyingCode ? <span className="spinner" style={{ width: 16, height: 16 }} /> : <Search size={15} />}
+          Verify
+        </button>
+      </div>
+      {verifiedSchool && (
+        <div className="flex items-center gap-2 mt-2.5 px-3 py-2.5 rounded-lg bg-green-50 border border-green-200 text-green-700 text-[13px]">
+          <School size={16} className="shrink-0" />
+          <span><strong>{verifiedSchool.school_name}</strong> — {verifiedSchool.district}, {verifiedSchool.state}</span>
+        </div>
+      )}
+      {!verifiedSchool && (
+        <p className="text-[11px] text-slate-400 mt-1.5">Enter the code and click Verify to confirm the school.</p>
+      )}
+    </div>
+  );
 
   return (
     <div className="auth-container py-12">
@@ -160,38 +242,43 @@ export default function RegisterPage() {
 
           <div className="form-group">
             <label className="form-label">Role</label>
-            <select className="form-select" value={role} onChange={e => setRole(e.target.value)}>
+            <select className="form-select" value={role} onChange={e => { setRole(e.target.value); setVerifiedSchool(null); setSchoolCode(''); }}>
+              <option value="student">Student</option>
               <option value="teacher">Teacher (or School Administrator)</option>
               <option value="admin">National Admin</option>
             </select>
           </div>
 
+          {/* STUDENT — always join by code */}
+          {role === 'student' && (
+            <div className="border-t border-slate-100 mt-5 pt-5">
+              <div className="flex items-center gap-2 mb-4">
+                <School size={16} className="text-india-500" />
+                <span className="text-[13px] font-bold text-slate-700">Join Your School</span>
+              </div>
+              <p className="text-[12px] text-slate-500 mb-4 leading-relaxed">
+                Enter the unique School Registration Code provided by your teacher or school administrator.
+              </p>
+              {renderCodeInput()}
+            </div>
+          )}
+
+          {/* TEACHER — join or register new */}
           {role === 'teacher' && (
             <div className="border-t border-slate-100 mt-5 pt-5">
               <div className="flex gap-6 mb-5">
                 <label className="flex items-center gap-2 text-[13px] text-slate-700 cursor-pointer font-medium">
-                  <input type="radio" className="w-4 h-4 accent-india-500 cursor-pointer" checked={schoolAction === 'join'} onChange={() => setSchoolAction('join')} />
+                  <input type="radio" className="w-4 h-4 accent-india-500 cursor-pointer" checked={schoolAction === 'join'} onChange={() => { setSchoolAction('join'); setVerifiedSchool(null); }} />
                   Join Existing School
                 </label>
                 <label className="flex items-center gap-2 text-[13px] text-slate-700 cursor-pointer font-medium">
-                  <input type="radio" className="w-4 h-4 accent-india-500 cursor-pointer" checked={schoolAction === 'new'} onChange={() => setSchoolAction('new')} />
+                  <input type="radio" className="w-4 h-4 accent-india-500 cursor-pointer" checked={schoolAction === 'new'} onChange={() => { setSchoolAction('new'); setVerifiedSchool(null); }} />
                   Register New School
                 </label>
               </div>
 
               {schoolAction === 'join' ? (
-                <div className="form-group">
-                  <label className="form-label">School Registration Code</label>
-                  <input 
-                    className="form-input"
-                    type="text" 
-                    placeholder="e.g. A1B2C3D4" 
-                    value={schoolCode} 
-                    onChange={e => setSchoolCode(e.target.value.toUpperCase())} 
-                    required={schoolAction === 'join'} 
-                  />
-                  <p className="text-[11px] text-slate-400 mt-1.5">Ask your school administrator for this unique 8-character code.</p>
-                </div>
+                renderCodeInput()
               ) : (
                 <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
                   <h4 className="text-[13px] font-bold text-slate-800 mb-4">New School Details</h4>

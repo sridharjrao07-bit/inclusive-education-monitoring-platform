@@ -129,8 +129,8 @@ def require_national_admin(current_user: User = Depends(get_current_user)) -> Us
 
 
 def require_teacher_or_admin(current_user: User = Depends(get_current_user)) -> User:
-    """Allow admin and teacher roles."""
-    allowed = ("national_admin", "state_admin", "admin", "teacher")
+    """Allow admin, teacher, and student roles."""
+    allowed = ("national_admin", "state_admin", "admin", "teacher", "student")
     if current_user.role not in allowed:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,

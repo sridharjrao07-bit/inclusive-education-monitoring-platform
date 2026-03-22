@@ -88,8 +88,8 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     school_id = None
     created_school_code = None
     
-    if user_data.role == "teacher":
-        if user_data.new_school:
+    if user_data.role in ("teacher", "student"):
+        if user_data.role == "teacher" and user_data.new_school:
             # Create a brand new school
             from models import generate_school_code
             code = generate_school_code()
@@ -114,14 +114,16 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
             created_school_code = code
             
         elif user_data.school_code:
-            # Join existing school
+            # Join existing school by code (for both teachers and students)
             school = db.query(School).filter(School.registration_code == user_data.school_code).first()
             if not school:
                 raise HTTPException(status_code=404, detail="Invalid School Registration Code")
             school_id = school.id
+            created_school_code = school.registration_code
             
         else:
-            raise HTTPException(status_code=400, detail="Teachers must provide a valid school_code or new_school details.")
+            msg = "Students must provide a valid school_code to join a school." if user_data.role == "student" else "Teachers must provide a valid school_code or new_school details."
+            raise HTTPException(status_code=400, detail=msg)
 
     new_user = User(
         username=user_data.username,
@@ -147,6 +149,22 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
             "is_active": new_user.is_active,
         },
         "school_code": created_school_code
+    }
+
+
+
+@app.get("/auth/verify-code/{code}")
+def verify_school_code(code: str, db: Session = Depends(get_db)):
+    """Validate a school registration code and return school info."""
+    school = db.query(School).filter(School.registration_code == code.upper()).first()
+    if not school:
+        raise HTTPException(status_code=404, detail="Invalid school code")
+    return {
+        "valid": True,
+        "school_name": school.name,
+        "district": school.district,
+        "state": school.state,
+        "school_type": school.school_type,
     }
 
 

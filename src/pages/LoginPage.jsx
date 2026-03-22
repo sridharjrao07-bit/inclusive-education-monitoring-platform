@@ -1,7 +1,10 @@
 import { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../AuthContext';
-import { GraduationCap, Eye, EyeOff, LogIn, AlertCircle } from 'lucide-react';
+import { GraduationCap, Eye, EyeOff, LogIn, AlertCircle, KeyRound, School, Search } from 'lucide-react';
+import axios from 'axios';
+
+const backendURL = import.meta.env.VITE_API_URL || '';
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -11,6 +14,12 @@ export default function LoginPage() {
   const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
+
+  // School code lookup
+  const [showCodeLookup, setShowCodeLookup] = useState(false);
+  const [lookupCode, setLookupCode] = useState('');
+  const [lookupResult, setLookupResult] = useState(null);
+  const [lookupLoading, setLookupLoading] = useState(false);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -23,6 +32,21 @@ export default function LoginPage() {
       setError(err.response?.data?.detail || 'Login failed. Please try again.');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleCodeLookup = async () => {
+    if (!lookupCode || lookupCode.length < 4) return;
+    setLookupLoading(true);
+    setLookupResult(null);
+    try {
+      const authBase = backendURL ? `${backendURL}/auth` : '/auth';
+      const res = await axios.get(`${authBase}/verify-code/${lookupCode}`);
+      setLookupResult({ valid: true, ...res.data });
+    } catch {
+      setLookupResult({ valid: false });
+    } finally {
+      setLookupLoading(false);
     }
   };
 
@@ -99,8 +123,66 @@ export default function LoginPage() {
           </button>
         </form>
 
-        {/* Demo credentials */}
+        {/* School Code Lookup */}
         <div className="mt-6 pt-5 border-t border-slate-100">
+          <button
+            type="button"
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg text-[13px] font-medium transition cursor-pointer border"
+            style={{
+              background: showCodeLookup ? '#f0f4ff' : '#f8fafc',
+              borderColor: showCodeLookup ? '#c7d2fe' : '#e2e8f0',
+              color: showCodeLookup ? '#4338ca' : '#475569',
+            }}
+            onClick={() => setShowCodeLookup(!showCodeLookup)}
+          >
+            <KeyRound size={15} />
+            {showCodeLookup ? 'Hide School Code Lookup' : 'Have a School Code? Look Up Your School'}
+          </button>
+
+          {showCodeLookup && (
+            <div className="mt-4 p-4 rounded-xl bg-slate-50 border border-slate-200">
+              <p className="text-[12px] text-slate-500 mb-3 leading-relaxed">
+                Enter your school's unique registration code to see which school it belongs to. 
+                If you don't have an account yet, <Link to="/register" className="text-india-500 font-medium no-underline">register here</Link>.
+              </p>
+              <div className="flex gap-2">
+                <input
+                  className="form-input flex-1"
+                  type="text"
+                  placeholder="e.g. A1B2C3D4"
+                  value={lookupCode}
+                  onChange={e => { setLookupCode(e.target.value.toUpperCase()); setLookupResult(null); }}
+                  maxLength={8}
+                />
+                <button
+                  type="button"
+                  className="btn btn-primary px-4 py-2 text-[13px] flex items-center gap-1.5 whitespace-nowrap"
+                  style={{ minWidth: 'auto' }}
+                  onClick={handleCodeLookup}
+                  disabled={lookupLoading || lookupCode.length < 4}
+                >
+                  {lookupLoading ? <span className="spinner" style={{ width: 16, height: 16 }} /> : <Search size={15} />}
+                  Verify
+                </button>
+              </div>
+              {lookupResult && lookupResult.valid && (
+                <div className="flex items-center gap-2 mt-3 px-3 py-2.5 rounded-lg bg-green-50 border border-green-200 text-green-700 text-[13px]">
+                  <School size={16} className="shrink-0" />
+                  <span><strong>{lookupResult.school_name}</strong> — {lookupResult.district}, {lookupResult.state}</span>
+                </div>
+              )}
+              {lookupResult && !lookupResult.valid && (
+                <div className="flex items-center gap-2 mt-3 px-3 py-2.5 rounded-lg bg-red-50 border border-red-200 text-red-600 text-[13px]">
+                  <AlertCircle size={16} className="shrink-0" />
+                  <span>Invalid code. Please check and try again.</span>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* Demo credentials */}
+        <div className="mt-5 pt-5 border-t border-slate-100">
           <p className="text-xs font-semibold text-slate-500 mb-2 text-center">Demo Credentials</p>
           <div className="flex flex-wrap gap-2 justify-center">
             <button className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200 text-xs font-medium text-slate-600 hover:bg-india-50 hover:text-india-600 transition cursor-pointer"

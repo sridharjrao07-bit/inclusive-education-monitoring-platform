@@ -28,7 +28,14 @@ export default function RegisterPage() {
   const [newSchoolDistrict, setNewSchoolDistrict] = useState('');
   const [newSchoolState, setNewSchoolState] = useState('');
   const [newSchoolType, setNewSchoolType] = useState('Urban');
-  
+  const [generatedSchoolCode, setGeneratedSchoolCode] = useState('');
+
+  // Generate an 8-character random code
+  const generateRandomCode = () => {
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    return Array.from({ length: 8 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
+  };
+
   // UI State
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
@@ -94,6 +101,7 @@ export default function RegisterPage() {
           district: newSchoolDistrict,
           state: newSchoolState,
           school_type: newSchoolType,
+          registration_code: generatedSchoolCode || generateRandomCode(),
         };
       }
     }
@@ -272,7 +280,7 @@ export default function RegisterPage() {
                   Join Existing School
                 </label>
                 <label className="flex items-center gap-2 text-[13px] text-slate-700 cursor-pointer font-medium">
-                  <input type="radio" className="w-4 h-4 accent-india-500 cursor-pointer" checked={schoolAction === 'new'} onChange={() => { setSchoolAction('new'); setVerifiedSchool(null); }} />
+                  <input type="radio" className="w-4 h-4 accent-india-500 cursor-pointer" checked={schoolAction === 'new'} onChange={() => { setSchoolAction('new'); setVerifiedSchool(null); if (!generatedSchoolCode) setGeneratedSchoolCode(generateRandomCode()); }} />
                   Register New School
                 </label>
               </div>
@@ -281,7 +289,13 @@ export default function RegisterPage() {
                 renderCodeInput()
               ) : (
                 <div className="bg-slate-50 p-5 rounded-xl border border-slate-200">
-                  <h4 className="text-[13px] font-bold text-slate-800 mb-4">New School Details</h4>
+                  <div className="flex justify-between items-start mb-4">
+                    <h4 className="text-[13px] font-bold text-slate-800">New School Details</h4>
+                    <div className="bg-indigo-50 border border-indigo-100 rounded-md px-3 py-2 text-right">
+                      <p className="text-[10px] text-indigo-500 uppercase font-bold tracking-wider mb-0.5">Registration Code</p>
+                      <p className="text-sm font-black text-indigo-700 tracking-widest">{generatedSchoolCode}</p>
+                    </div>
+                  </div>
                   <div className="form-group">
                     <label className="form-label">School Name</label>
                     <input className="form-input" type="text" value={newSchoolName} onChange={e => setNewSchoolName(e.target.value)} required={schoolAction === 'new'} />

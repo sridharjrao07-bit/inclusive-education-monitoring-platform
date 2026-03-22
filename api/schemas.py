@@ -151,6 +151,7 @@ class NewSchoolData(BaseModel):
     district: str
     state: str
     school_type: str = "Urban"
+    registration_code: Optional[str] = None
 
 class UserCreate(BaseModel):
     username: str

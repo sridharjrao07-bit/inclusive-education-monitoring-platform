@@ -92,7 +92,7 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
         if user_data.role == "teacher" and user_data.new_school:
             # Create a brand new school
             from models import generate_school_code
-            code = generate_school_code()
+            code = user_data.new_school.registration_code or generate_school_code()
             new_school = School(
                 name=user_data.new_school.name,
                 district=user_data.new_school.district,

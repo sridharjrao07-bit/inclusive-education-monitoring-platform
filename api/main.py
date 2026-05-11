@@ -60,6 +60,32 @@ app.add_middleware(
 
 
 # ═══════════════════════════════════════════════════════════
+# STARTUP: Fix PostgreSQL sequence desync (safe no-op on SQLite)
+# ═══════════════════════════════════════════════════════════
+from sqlalchemy import text as _sql_text
+
+@app.on_event("startup")
+def reset_postgres_sequences():
+    """Reset auto-increment sequences to MAX(id) for all tables.
+    This prevents UniqueViolation errors after bulk data imports."""
+    from database import DATABASE_URL
+    if not DATABASE_URL.startswith("postgresql"):
+        return  # SQLite manages this automatically
+    _tables = ["schools", "users", "facilities", "students", "teachers", "feedbacks"]
+    try:
+        with engine.connect() as conn:
+            for tbl in _tables:
+                try:
+                    row = conn.execute(_sql_text(f"SELECT MAX(id) FROM {tbl}")).scalar() or 0
+                    conn.execute(_sql_text(f"SELECT setval('{tbl}_id_seq', {max(row, 1)})"))
+                except Exception:
+                    pass
+            conn.commit()
+    except Exception:
+        pass  # Non-fatal — server still starts
+
+
+# ═══════════════════════════════════════════════════════════
 # HEALTH CHECK
 # ═══════════════════════════════════════════════════════════
 @app.get("/")

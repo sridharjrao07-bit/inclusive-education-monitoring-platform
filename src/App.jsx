@@ -1,18 +1,28 @@
 import { BrowserRouter as Router, Routes, Route, NavLink, useLocation, Navigate } from 'react-router-dom';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, Suspense, lazy } from 'react';
 import {
   LayoutDashboard, School, Users, ClipboardList,
   Bot, GraduationCap, ChevronRight, LogOut, Upload
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './AuthContext';
-import Dashboard from './pages/Dashboard';
-import SchoolsPage from './pages/SchoolsPage';
-import DataEntry from './pages/DataEntry';
-import AIAssistant from './pages/AIAssistant';
-import AttendancePage from './pages/AttendancePage';
-import LoginPage from './pages/LoginPage';
-import RegisterPage from './pages/RegisterPage';
 import { seedAdmin } from './api';
+
+// Lazy-loaded pages — each becomes its own JS chunk
+const Dashboard      = lazy(() => import('./pages/Dashboard'));
+const SchoolsPage    = lazy(() => import('./pages/SchoolsPage'));
+const DataEntry      = lazy(() => import('./pages/DataEntry'));
+const AIAssistant    = lazy(() => import('./pages/AIAssistant'));
+const AttendancePage = lazy(() => import('./pages/AttendancePage'));
+const LoginPage      = lazy(() => import('./pages/LoginPage'));
+const RegisterPage   = lazy(() => import('./pages/RegisterPage'));
+
+function PageLoader() {
+  return (
+    <div className="page-loader" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', fontSize: '1rem', color: 'var(--text-muted, #888)' }}>
+      Loading…
+    </div>
+  );
+}
 
 /* ProtectedRoute — redirects to /login if not authenticated */
 function ProtectedRoute({ children }) {
@@ -51,10 +61,12 @@ function AppContent() {
   // If on login or register page, render only that page (no sidebar)
   if (location.pathname === '/login' || location.pathname === '/register') {
     return (
-      <Routes>
-        <Route path="/login" element={<LoginPage />} />
-        <Route path="/register" element={<RegisterPage />} />
-      </Routes>
+      <Suspense fallback={<PageLoader />}>
+        <Routes>
+          <Route path="/login" element={<LoginPage />} />
+          <Route path="/register" element={<RegisterPage />} />
+        </Routes>
+      </Suspense>
     );
   }
 
@@ -144,14 +156,16 @@ function AppContent() {
 
       {/* ── MAIN ── */}
       <main className="main-content">
-        <Routes>
-          <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
-          <Route path="/schools" element={<ProtectedRoute><SchoolsPage /></ProtectedRoute>} />
-          <Route path="/data-entry" element={<ProtectedRoute><DataEntry /></ProtectedRoute>} />
-          <Route path="/ai" element={<ProtectedRoute><AIAssistant /></ProtectedRoute>} />
-          <Route path="/attendance" element={<ProtectedRoute><AttendancePage /></ProtectedRoute>} />
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
+        <Suspense fallback={<PageLoader />}>
+          <Routes>
+            <Route path="/" element={<ProtectedRoute><Dashboard /></ProtectedRoute>} />
+            <Route path="/schools" element={<ProtectedRoute><SchoolsPage /></ProtectedRoute>} />
+            <Route path="/data-entry" element={<ProtectedRoute><DataEntry /></ProtectedRoute>} />
+            <Route path="/ai" element={<ProtectedRoute><AIAssistant /></ProtectedRoute>} />
+            <Route path="/attendance" element={<ProtectedRoute><AttendancePage /></ProtectedRoute>} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </Suspense>
       </main>
     </div>
   );

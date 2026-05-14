@@ -293,6 +293,20 @@ def health_check(db: Session = Depends(get_db)):
     except Exception as e:
         return {"status": "error", "detail": str(e)}
 
+@app.get("/api/stats/summary")
+def get_stats_summary(
+    state: str = Query(None),
+    db: Session = Depends(get_db),
+):
+    """Fast KPI counts only — returns in <1s."""
+    cache_key = f"summary_{state or '__all__'}"
+    cached = _stats_cache.get(cache_key)
+    if cached and (_time.time() - cached["ts"]) < _CACHE_TTL:
+        return cached["data"]
+    result = crud.get_dashboard_summary(db, state=state)
+    _stats_cache[cache_key] = {"data": result, "ts": _time.time()}
+    return result
+
 @app.get("/api/stats")
 def get_stats(
     state: str = Query(None),

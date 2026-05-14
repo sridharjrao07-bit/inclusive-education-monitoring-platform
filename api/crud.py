@@ -1,5 +1,5 @@
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func
+from sqlalchemy import func, case, text
 from models import School, Facility, Student, Teacher, Feedback
 from schemas import SchoolCreate, StudentCreate, TeacherCreate, FeedbackCreate
 
@@ -74,11 +74,11 @@ def create_student(db: Session, student: StudentCreate):
 
 
 # ─── Teacher CRUD ────────────────────────────────────────
-def get_teachers(db: Session, school_id: int = None):
+def get_teachers(db: Session, school_id: int = None, limit: int = 500):
     q = db.query(Teacher)
     if school_id:
         q = q.filter(Teacher.school_id == school_id)
-    return q.all()
+    return q.limit(limit).all()
 
 
 def create_teacher(db: Session, teacher: TeacherCreate):
@@ -170,97 +170,188 @@ def recalculate_school_scores(db: Session, school_id: int):
     db.commit()
 
 
-# ─── Dashboard Stats ─────────────────────────────────────
-def get_dashboard_stats(db: Session, state: str = None):
-    school_query = db.query(School)
+# ─── Dashboard Stats ─────────────────────────────────────────
+def get_dashboard_summary(db: Session, state: str = None):
+    """Fast summary: only school + student aggregate counts. Returns in <500ms."""
+    school_filter = School.state == state if state else True
+
+    school_agg = db.query(
+        func.count(School.id).label("total_schools"),
+        func.avg(School.inclusion_score).label("avg_inclusion"),
+        func.avg(School.accessibility_score).label("avg_accessibility"),
+    ).filter(school_filter).one()
+
+    student_school_subq = (
+        db.query(School.id).filter(school_filter).subquery()
+    ) if state else None
+
+    student_q = db.query(Student)
     if state:
-        school_query = school_query.filter(School.state == state)
-    schools = school_query.all()
+        student_q = student_q.filter(Student.school_id.in_(student_school_subq))
 
-    school_ids = [s.id for s in schools]
-    student_query = db.query(Student)
-    if school_ids:
-        student_query = student_query.filter(Student.school_id.in_(school_ids))
-    students = student_query.all()
-
-    total_schools = len(schools)
-    total_students = len(students)
-
-    avg_inclusion = round(
-        sum(s.inclusion_score for s in schools) / total_schools, 1
-    ) if total_schools > 0 else 0
-
-    avg_accessibility = round(
-        sum(s.accessibility_score for s in schools) / total_schools, 1
-    ) if total_schools > 0 else 0
-
-    high_risk = sum(1 for s in students if s.dropout_risk >= 60)
-
-    avg_attendance = round(
-        sum(s.attendance_rate for s in students) / total_students, 1
-    ) if total_students > 0 else 0
-
-    # Gender distribution
-    gender_dist = {}
-    for s in students:
-        gender_dist[s.gender] = gender_dist.get(s.gender, 0) + 1
-
-    # Category distribution
-    cat_dist = {}
-    for s in students:
-        cat_dist[s.category] = cat_dist.get(s.category, 0) + 1
-
-    # Disability distribution
-    dis_dist = {}
-    for s in students:
-        dis_dist[s.disability_type] = dis_dist.get(s.disability_type, 0) + 1
-
-    # School type distribution
-    type_dist = {}
-    for s in schools:
-        type_dist[s.school_type] = type_dist.get(s.school_type, 0) + 1
-
-    # State-wise inclusion scores
-    state_scores = {}
-    state_counts = {}
-    for s in schools:
-        state_scores[s.state] = state_scores.get(s.state, 0) + s.inclusion_score
-        state_counts[s.state] = state_counts.get(s.state, 0) + 1
-
-    state_wise = [
-        {"state": st, "avg_inclusion": round(state_scores[st] / state_counts[st], 1),
-         "school_count": state_counts[st]}
-        for st in sorted(state_scores.keys())
-    ]
-
-    # Top risk schools
-    top_risk = []
-    for school in schools:
-        school_students = [s for s in students if s.school_id == school.id]
-        if school_students:
-            avg_risk = sum(s.dropout_risk for s in school_students) / len(school_students)
-            if avg_risk >= 40:
-                top_risk.append({
-                    "id": school.id,
-                    "name": school.name,
-                    "district": school.district,
-                    "state": school.state,
-                    "avg_dropout_risk": round(avg_risk, 1),
-                    "student_count": len(school_students),
-                })
-    top_risk.sort(key=lambda x: x["avg_dropout_risk"], reverse=True)
+    student_agg = student_q.with_entities(
+        func.count(Student.id).label("total_students"),
+        func.avg(Student.attendance_rate).label("avg_attendance"),
+        func.sum(case((Student.dropout_risk >= 60, 1), else_=0)).label("high_risk"),
+    ).one()
 
     return {
-        "total_schools": total_schools,
-        "total_students": total_students,
-        "avg_inclusion_score": avg_inclusion,
-        "avg_accessibility_score": avg_accessibility,
-        "dropout_risk_high_count": high_risk,
-        "avg_attendance": avg_attendance,
+        "total_schools": school_agg.total_schools or 0,
+        "total_students": student_agg.total_students or 0,
+        "avg_inclusion_score": round(school_agg.avg_inclusion or 0, 1),
+        "avg_accessibility_score": round(school_agg.avg_accessibility or 0, 1),
+        "dropout_risk_high_count": int(student_agg.high_risk or 0),
+        "avg_attendance": round(float(student_agg.avg_attendance or 0), 1),
+        # Empty placeholders - charts endpoint fills these
+        "gender_distribution": {},
+        "category_distribution": {},
+        "disability_distribution": {},
+        "school_type_distribution": {},
+        "state_wise_inclusion": [],
+        "top_risk_schools": [],
+    }
+
+
+def get_dashboard_stats(db: Session, state: str = None):
+    """Fast dashboard stats using SQL-level conditional aggregation."""
+
+    # ── Base filters ──────────────────────────────────────
+    school_filter = School.state == state if state else True
+    student_school_subq = (
+        db.query(School.id)
+        .filter(school_filter)
+        .subquery()
+    ) if state else None
+
+    # ── School-level aggregates ───────────────────────────
+    school_agg = db.query(
+        func.count(School.id).label("total_schools"),
+        func.avg(School.inclusion_score).label("avg_inclusion"),
+        func.avg(School.accessibility_score).label("avg_accessibility"),
+    ).filter(school_filter).one()
+
+    # ── Single-pass Student aggregates ────────────────────
+    student_q = db.query(Student)
+    if state:
+        student_q = student_q.filter(Student.school_id.in_(student_school_subq))
+
+    student_agg = student_q.with_entities(
+        func.count(Student.id).label("total_students"),
+        func.avg(Student.attendance_rate).label("avg_attendance"),
+        func.sum(case((Student.dropout_risk >= 60, 1), else_=0)).label("high_risk"),
+        
+        func.sum(case((Student.gender == 'Male', 1), else_=0)).label("g_male"),
+        func.sum(case((Student.gender == 'Female', 1), else_=0)).label("g_female"),
+        func.sum(case((Student.gender == 'Other', 1), else_=0)).label("g_other"),
+        
+        func.sum(case((Student.category == 'General', 1), else_=0)).label("c_general"),
+        func.sum(case((Student.category == 'OBC', 1), else_=0)).label("c_obc"),
+        func.sum(case((Student.category == 'SC', 1), else_=0)).label("c_sc"),
+        func.sum(case((Student.category == 'ST', 1), else_=0)).label("c_st"),
+        
+        func.sum(case((Student.disability_type == 'None', 1), else_=0)).label("d_none"),
+        func.sum(case((Student.disability_type == 'Visual', 1), else_=0)).label("d_visual"),
+        func.sum(case((Student.disability_type == 'Hearing', 1), else_=0)).label("d_hearing"),
+        func.sum(case((Student.disability_type == 'Locomotor', 1), else_=0)).label("d_locomotor"),
+        func.sum(case((Student.disability_type == 'Cognitive', 1), else_=0)).label("d_cognitive"),
+        func.sum(case((Student.disability_type == 'Multiple', 1), else_=0)).label("d_multiple"),
+    ).one()
+
+    gender_dist = {
+        "Male": int(student_agg.g_male or 0),
+        "Female": int(student_agg.g_female or 0),
+        "Other": int(student_agg.g_other or 0)
+    }
+    
+    cat_dist = {
+        "General": int(student_agg.c_general or 0),
+        "OBC": int(student_agg.c_obc or 0),
+        "SC": int(student_agg.c_sc or 0),
+        "ST": int(student_agg.c_st or 0)
+    }
+    
+    dis_dist = {
+        "None": int(student_agg.d_none or 0),
+        "Visual": int(student_agg.d_visual or 0),
+        "Hearing": int(student_agg.d_hearing or 0),
+        "Locomotor": int(student_agg.d_locomotor or 0),
+        "Cognitive": int(student_agg.d_cognitive or 0),
+        "Multiple": int(student_agg.d_multiple or 0)
+    }
+
+    # ── School type distribution ──────────────────────────
+    type_dist = {
+        t: n for t, n in
+        db.query(School.school_type, func.count(School.id))
+        .filter(school_filter)
+        .group_by(School.school_type)
+        .all()
+    }
+
+    # ── State-wise inclusion scores ───────────────────────
+    state_wise_rows = (
+        db.query(
+            School.state,
+            func.avg(School.inclusion_score).label("avg_inclusion"),
+            func.count(School.id).label("school_count"),
+        )
+        .filter(school_filter)
+        .group_by(School.state)
+        .order_by(School.state)
+        .all()
+    )
+    state_wise = [
+        {
+            "state": row.state,
+            "avg_inclusion": round(row.avg_inclusion or 0, 1),
+            "school_count": row.school_count,
+        }
+        for row in state_wise_rows
+    ]
+
+    # ── Top risk schools (SQL aggregated) ────────────────
+    risk_q = (
+        db.query(
+            Student.school_id,
+            func.avg(Student.dropout_risk).label("avg_risk"),
+            func.count(Student.id).label("student_count"),
+        )
+        .group_by(Student.school_id)
+        .having(func.avg(Student.dropout_risk) >= 40)
+        .order_by(func.avg(Student.dropout_risk).desc())
+        .limit(10)
+    )
+    if state:
+        risk_q = risk_q.filter(Student.school_id.in_(student_school_subq))
+
+    risk_rows = risk_q.all()
+    risk_school_ids = [r.school_id for r in risk_rows]
+    risk_schools = {s.id: s for s in db.query(School).filter(School.id.in_(risk_school_ids)).all()}
+
+    top_risk = [
+        {
+            "id": r.school_id,
+            "name": risk_schools[r.school_id].name if r.school_id in risk_schools else "Unknown",
+            "district": risk_schools[r.school_id].district if r.school_id in risk_schools else "",
+            "state": risk_schools[r.school_id].state if r.school_id in risk_schools else "",
+            "avg_dropout_risk": round(r.avg_risk, 1),
+            "student_count": r.student_count,
+        }
+        for r in risk_rows
+        if r.school_id in risk_schools
+    ]
+
+    return {
+        "total_schools": school_agg.total_schools or 0,
+        "total_students": student_agg.total_students or 0,
+        "avg_inclusion_score": round(school_agg.avg_inclusion or 0, 1),
+        "avg_accessibility_score": round(school_agg.avg_accessibility or 0, 1),
+        "dropout_risk_high_count": int(student_agg.high_risk or 0),
+        "avg_attendance": round(float(student_agg.avg_attendance or 0), 1),
         "gender_distribution": gender_dist,
         "category_distribution": cat_dist,
         "disability_distribution": dis_dist,
         "school_type_distribution": type_dist,
         "state_wise_inclusion": state_wise,
-        "top_risk_schools": top_risk[:10],
+        "top_risk_schools": top_risk,
     }

@@ -55,12 +55,26 @@ const CustomTooltip = ({ active, payload }) => {
 export default function Dashboard() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  const [chartsLoading, setChartsLoading] = useState(true);
 
   useEffect(() => {
-    fetchStats()
-      .then(setStats)
-      .catch(console.error)
-      .finally(() => setLoading(false));
+    // Phase 1: Load fast summary (KPI cards) immediately
+    fetch('/api/stats/summary')
+      .then(r => r.json())
+      .then(data => {
+        setStats(data);
+        setLoading(false);
+      })
+      .catch(() => setLoading(false));
+
+    // Phase 2: Load full stats (charts) in background
+    fetch('/api/stats')
+      .then(r => r.json())
+      .then(data => {
+        setStats(data);
+        setChartsLoading(false);
+      })
+      .catch(() => setChartsLoading(false));
   }, []);
 
   if (loading) {
@@ -81,9 +95,10 @@ export default function Dashboard() {
 
   if (!stats) return <div className="empty-state"><h3>No data available</h3></div>;
 
-  const genderData = Object.entries(stats.gender_distribution).map(([name, value]) => ({ name, value }));
-  const categoryData = Object.entries(stats.category_distribution).map(([name, value]) => ({ name, value }));
-  const stateData = stats.state_wise_inclusion || [];
+  const genderData = chartsLoading ? [] : Object.entries(stats.gender_distribution || {}).map(([name, value]) => ({ name, value }));
+  const categoryData = chartsLoading ? [] : Object.entries(stats.category_distribution || {}).map(([name, value]) => ({ name, value }));
+  const stateData = chartsLoading ? [] : (stats.state_wise_inclusion || []);
+
 
   return (
     <div className="fade-in">
@@ -126,6 +141,11 @@ export default function Dashboard() {
 
       {/* ── SECTION: Demographics ── */}
       <div className="section-title">Demographics</div>
+      {chartsLoading ? (
+        <div className="charts-grid">
+          {[1, 2].map(i => <div key={i} className="skeleton" style={{ height: 280 }} />)}
+        </div>
+      ) : (
       <div className="charts-grid">
         {/* Gender Distribution */}
         <div className="card fade-in">
@@ -177,11 +197,17 @@ export default function Dashboard() {
           </div>
         </div>
       </div>
+      )}
 
       <div className="section-divider" />
 
       {/* ── SECTION: State Performance ── */}
       <div className="section-title">State Performance</div>
+      {chartsLoading ? (
+        <div className="charts-grid charts-grid-full">
+          <div className="skeleton" style={{ height: 340 }} />
+        </div>
+      ) : (
       <div className="charts-grid charts-grid-full">
         <div className="card fade-in">
           <div className="card-header">
@@ -193,6 +219,7 @@ export default function Dashboard() {
               <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
               <XAxis dataKey="state" angle={-35} textAnchor="end" tick={{ fill: '#94a3b8', fontSize: 10 }}
                 height={60} />
+
               <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} domain={[0, 100]} />
               <Tooltip content={<CustomTooltip />} />
               <Bar dataKey="avg_inclusion" radius={[6, 6, 0, 0]} maxBarSize={28}>
@@ -204,9 +231,10 @@ export default function Dashboard() {
           </ResponsiveContainer>
         </div>
       </div>
+      )}
 
       {/* ── SECTION: Schools Needing Intervention ── */}
-      {stats.top_risk_schools && stats.top_risk_schools.length > 0 && (
+      {!chartsLoading && stats.top_risk_schools && stats.top_risk_schools.length > 0 && (
         <>
           <div className="section-divider" />
           <div className="section-title">Schools Needing Intervention</div>

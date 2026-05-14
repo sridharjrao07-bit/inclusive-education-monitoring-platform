@@ -38,8 +38,12 @@ API.interceptors.response.use(
 );
 
 // ─── Auth ─────────────────────────────────────────
-export const loginUser = (username, password) =>
-  AuthAPI.post('/login', { username, password }).then(r => r.data);
+export const loginUser = (username, password) => {
+  const params = new URLSearchParams();
+  params.append('username', username);
+  params.append('password', password);
+  return AuthAPI.post('/login', params).then(r => r.data);
+};
 
 export const registerUser = (data) =>
   AuthAPI.post('/register', data).then(r => r.data);

@@ -279,12 +279,32 @@ def seed_admin(db: Session = Depends(get_db)):
 # ═══════════════════════════════════════════════════════════
 # DASHBOARD STATS  (Public read access for demo)
 # ═══════════════════════════════════════════════════════════
+import time as _time
+_stats_cache: dict = {}
+_CACHE_TTL = 300  # 5 minutes
+
+@app.get("/api/health")
+def health_check(db: Session = Depends(get_db)):
+    """Quick connectivity check — does NOT run heavy stats query."""
+    from sqlalchemy import text
+    try:
+        db.execute(text("SELECT 1"))
+        return {"status": "ok", "db": "connected"}
+    except Exception as e:
+        return {"status": "error", "detail": str(e)}
+
 @app.get("/api/stats")
 def get_stats(
     state: str = Query(None),
     db: Session = Depends(get_db),
 ):
-    return crud.get_dashboard_stats(db, state=state)
+    cache_key = state or "__all__"
+    cached = _stats_cache.get(cache_key)
+    if cached and (_time.time() - cached["ts"]) < _CACHE_TTL:
+        return cached["data"]
+    result = crud.get_dashboard_stats(db, state=state)
+    _stats_cache[cache_key] = {"data": result, "ts": _time.time()}
+    return result
 
 
 # ═══════════════════════════════════════════════════════════

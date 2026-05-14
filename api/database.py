@@ -16,14 +16,8 @@ load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-# Use env var if available; otherwise fall back to local SQLite
-if os.getenv("VERCEL") == "1":
-    # On Vercel, the filesystem is read-only except for /tmp
-    # Use the Supabase PostgreSQL connection string as fallback so data is available
-    _b64 = "cG9zdGdyZXNxbDovL3Bvc3RncmVzLmNqcGJxc2l1bWhkZXljd3ZueW9yOnAwemt0MDZDS05jVmFsWllAYXdzLTEtYXAtc291dGhlYXN0LTEucG9vbGVyLnN1cGFiYXNlLmNvbTo2NTQzL3Bvc3RncmVz"
-    default_url = base64.b64decode(_b64).decode("utf-8")
-else:
-    default_url = f"sqlite:///{os.path.join(BASE_DIR, 'education.db')}"
+_b64 = "cG9zdGdyZXNxbDovL3Bvc3RncmVzLmNqcGJxc2l1bWhkZXljd3ZueW9yOnAwemt0MDZDS05jVmFsWllAYXdzLTEtYXAtc291dGhlYXN0LTEucG9vbGVyLnN1cGFiYXNlLmNvbTo2NTQzL3Bvc3RncmVz"
+default_url = base64.b64decode(_b64).decode("utf-8")
 
 DATABASE_URL = os.getenv("DATABASE_URL", default_url)
 

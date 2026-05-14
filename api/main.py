@@ -199,10 +199,16 @@ def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depend
     """Authenticate user with form data and return a JWT token."""
     print("LOGIN ATTEMPT:", repr(form_data.username), repr(form_data.password))
     user = db.query(User).filter(User.username == form_data.username).first()
-    if not user or not verify_password(form_data.password, user.hashed_password):
+    if not user:
         raise HTTPException(
             status_code=401,
-            detail="Incorrect username or password",
+            detail=f"User '{form_data.username}' not found in database.",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    if not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect password",
             headers={"WWW-Authenticate": "Bearer"},
         )
     if not user.is_active:

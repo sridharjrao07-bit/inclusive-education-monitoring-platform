@@ -262,7 +262,7 @@
   }
 
   .kpi-card {
-    @apply rounded-2xl p-6 flex flex-col gap-4 relative overflow-hidden transition-all duration-500 group cursor-pointer;
+    @apply rounded-2xl p-6 flex flex-col gap-4 relative overflow-hidden transition-all duration-500 cursor-pointer;
     background: rgba(20, 30, 50, 0.5);
     backdrop-filter: blur(12px);
     border: 1px solid rgba(255,255,255,0.05);

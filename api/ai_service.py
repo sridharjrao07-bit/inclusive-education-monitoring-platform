@@ -62,7 +62,7 @@ def predict_dropout_risk(
             # Predict probability of class 1 (high risk)
             # Returns a probability array like [[0.2, 0.8]]
             proba = ml_model.predict_proba(input_df)[0][1]
-            return round(proba * 100, 1)
+            return float(round(proba * 100, 1))
         except Exception as e:
             print(f"[AI Service] ML prediction failed: {e}. Falling back to heuristic.")
             # Fall through to heuristic if ML fails

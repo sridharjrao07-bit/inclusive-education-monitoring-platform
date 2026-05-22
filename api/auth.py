@@ -7,7 +7,7 @@ from typing import Optional
 from fastapi import Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+
 from sqlalchemy.orm import Session
 from dotenv import load_dotenv
 import os
@@ -22,8 +22,10 @@ SECRET_KEY = os.getenv("SECRET_KEY", "dev-secret-key-change-in-production")
 ALGORITHM = os.getenv("ALGORITHM", "HS256")
 ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
 
+import bcrypt
+
 # ─── Password Hashing (bcrypt) ──────────────────────────
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+# Using bcrypt directly instead of passlib
 
 # ─── OAuth2 scheme (reads token from Authorization header) ─
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
@@ -34,12 +36,13 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
 # ═══════════════════════════════════════════════════════════
 def hash_password(plain: str) -> str:
     """Hash a plaintext password with bcrypt."""
-    return pwd_context.hash(plain)
+    salt = bcrypt.gensalt()
+    return bcrypt.hashpw(plain.encode('utf-8'), salt).decode('utf-8')
 
 
 def verify_password(plain: str, hashed: str) -> bool:
     """Verify a plaintext password against its bcrypt hash."""
-    return pwd_context.verify(plain, hashed)
+    return bcrypt.checkpw(plain.encode('utf-8'), hashed.encode('utf-8'))
 
 
 def create_access_token(data: dict, expires_delta: Optional[timedelta] = None) -> str:

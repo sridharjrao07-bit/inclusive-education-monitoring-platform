@@ -3,11 +3,14 @@ FastAPI Main Application — Inclusive Education Monitoring Platform
 
 Includes JWT authentication with role-based access control (RBAC).
 """
-from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File
+from fastapi import FastAPI, Depends, HTTPException, Query, UploadFile, File, Request
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 import os
 import sys
+from typing import Optional
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
@@ -16,10 +19,9 @@ from models import School, Facility, Student, Teacher, Feedback, User
 from schemas import (
     SchoolOut, SchoolCreate, FacilityBase, FacilityOut, 
     StudentCreate, StudentOut, TeacherCreate, TeacherOut, 
-    FeedbackCreate, FeedbackOut, UserCreate, UserOut, Token, 
-    NLQueryRequest, NLQueryResponse, LoginRequest
+    FeedbackCreate, FeedbackOut, UserCreate, UserOut, Token,
+    NLQueryRequest, NLQueryResponse
 )
-from fastapi.security import OAuth2PasswordRequestForm
 import crud
 import ai_service
 from adapters.csv_adapter import CSVAdapter
@@ -57,6 +59,23 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+def normalize_school_code(code: Optional[str]) -> Optional[str]:
+    """Store and compare school codes in one canonical format."""
+    if code is None:
+        return None
+    normalized = code.strip().upper()
+    return normalized or None
+
+
+def normalize_name(value: Optional[str]) -> str:
+    return " ".join((value or "").split()).strip()
+
+
+def school_name_exists(db: Session, name: str) -> bool:
+    normalized = normalize_name(name).lower()
+    return db.query(School).filter(func.lower(func.trim(School.name)) == normalized).first() is not None
 
 
 # ═══════════════════════════════════════════════════════════
@@ -99,6 +118,9 @@ def root():
 @app.post("/auth/register")
 def register(user_data: UserCreate, db: Session = Depends(get_db)):
     """Register a new user."""
+    user_data.username = user_data.username.strip()
+    user_data.email = user_data.email.strip().lower()
+
     # Check if username already exists
     if db.query(User).filter(User.username == user_data.username).first():
         raise HTTPException(status_code=400, detail="Username already registered")
@@ -118,11 +140,33 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
         if user_data.role == "teacher" and user_data.new_school:
             # Create a brand new school
             from models import generate_school_code
-            code = user_data.new_school.registration_code or generate_school_code()
+            school_name = normalize_name(user_data.new_school.name)
+            if not school_name:
+                raise HTTPException(status_code=400, detail="School name is required")
+            if school_name_exists(db, school_name):
+                raise HTTPException(status_code=400, detail="A school with this name is already registered")
+
+            district = normalize_name(user_data.new_school.district)
+            state = normalize_name(user_data.new_school.state)
+            if not district or not state:
+                raise HTTPException(status_code=400, detail="School district and state are required")
+
+            requested_code = normalize_school_code(user_data.new_school.registration_code)
+            if requested_code and db.query(School).filter(School.registration_code == requested_code).first():
+                raise HTTPException(status_code=400, detail="School registration code is already in use")
+            code = requested_code
+            for _ in range(10):
+                code = code or generate_school_code()
+                if not db.query(School).filter(School.registration_code == code).first():
+                    break
+                code = None
+            if not code:
+                raise HTTPException(status_code=500, detail="Could not generate a unique school registration code")
+
             new_school = School(
-                name=user_data.new_school.name,
-                district=user_data.new_school.district,
-                state=user_data.new_school.state,
+                name=school_name,
+                district=district,
+                state=state,
                 school_type=user_data.new_school.school_type,
                 registration_code=code,
                 board="State Board",
@@ -141,7 +185,8 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
             
         elif user_data.school_code:
             # Join existing school by code (for both teachers and students)
-            school = db.query(School).filter(School.registration_code == user_data.school_code).first()
+            school_code = normalize_school_code(user_data.school_code)
+            school = db.query(School).filter(School.registration_code == school_code).first()
             if not school:
                 raise HTTPException(status_code=404, detail="Invalid School Registration Code")
             school_id = school.id
@@ -160,7 +205,11 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
         state=user_data.state,
     )
     db.add(new_user)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Registration could not be completed because of duplicate data")
     db.refresh(new_user)
     
     # We return the UserOut data + optionally the generated school_code if they just created one!
@@ -182,7 +231,7 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
 @app.get("/auth/verify-code/{code}")
 def verify_school_code(code: str, db: Session = Depends(get_db)):
     """Validate a school registration code and return school info."""
-    school = db.query(School).filter(School.registration_code == code.upper()).first()
+    school = db.query(School).filter(School.registration_code == normalize_school_code(code)).first()
     if not school:
         raise HTTPException(status_code=404, detail="Invalid school code")
     return {
@@ -195,17 +244,32 @@ def verify_school_code(code: str, db: Session = Depends(get_db)):
 
 
 @app.post("/auth/login", response_model=Token)
-def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
-    """Authenticate user with form data and return a JWT token."""
-    print("LOGIN ATTEMPT:", repr(form_data.username), repr(form_data.password))
-    user = db.query(User).filter(User.username == form_data.username).first()
+async def login(request: Request, db: Session = Depends(get_db)):
+    """Authenticate user with form data or JSON and return a JWT token."""
+    content_type = request.headers.get("content-type", "")
+    if "application/json" in content_type:
+        payload = await request.json()
+        username = (payload.get("username") or "").strip()
+        password = payload.get("password") or ""
+    else:
+        form_data = await request.form()
+        username = (form_data.get("username") or "").strip()
+        password = form_data.get("password") or ""
+
+    if not username or not password:
+        raise HTTPException(
+            status_code=400,
+            detail="Username and password are required",
+        )
+
+    user = db.query(User).filter(User.username == username).first()
     if not user:
         raise HTTPException(
             status_code=401,
-            detail=f"User '{form_data.username}' not found in database.",
+            detail="Invalid username or password",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    if not verify_password(form_data.password, user.hashed_password):
+    if not verify_password(password, user.hashed_password):
         raise HTTPException(
             status_code=401,
             detail="Incorrect password",
@@ -330,9 +394,10 @@ def list_schools(
     limit: int = 100,
     state: str = Query(None),
     school_type: str = Query(None),
+    search: str = Query(None),
     db: Session = Depends(get_db),
 ):
-    return crud.get_schools(db, skip=skip, limit=limit, state=state, school_type=school_type)
+    return crud.get_schools(db, skip=skip, limit=limit, state=state, school_type=school_type, search=search)
 
 
 @app.get("/api/schools/{school_id}", response_model=SchoolOut)
@@ -352,6 +417,13 @@ def create_school(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_admin),
 ):
+    school.name = normalize_name(school.name)
+    school.district = normalize_name(school.district)
+    school.state = normalize_name(school.state)
+    if not school.name or not school.district or not school.state:
+        raise HTTPException(status_code=400, detail="School name, district, and state are required")
+    if school_name_exists(db, school.name):
+        raise HTTPException(status_code=400, detail="A school with this name is already registered")
     return crud.create_school(db, school)
 
 
@@ -381,13 +453,14 @@ def update_facility(
 # ═══════════════════════════════════════════════════════════
 @app.get("/api/attendance-stats")
 def get_attendance_stats(
+    state: str = Query(None),
     db: Session = Depends(get_db),
 ):
     """Returns pre-aggregated attendance data so the frontend doesn't need to fetch all students."""
     from sqlalchemy import func as sqlfunc, case
 
     # 1. Per-school aggregation in SQL
-    school_agg = (
+    query = (
         db.query(
             Student.school_id,
             sqlfunc.count(Student.id).label("total"),
@@ -395,19 +468,28 @@ def get_attendance_stats(
             sqlfunc.sum(case((Student.attendance_rate < 60, 1), else_=0)).label("low_count"),
             sqlfunc.sum(case((Student.attendance_rate < 40, 1), else_=0)).label("critical_count"),
         )
-        .group_by(Student.school_id)
-        .all()
+        .join(School, Student.school_id == School.id)
     )
+    if state:
+        query = query.filter(School.state == state)
+    
+    school_agg = query.group_by(Student.school_id).all()
 
     school_ids = [row.school_id for row in school_agg]
     schools = db.query(School).filter(School.id.in_(school_ids)).all()
     school_map = {s.id: s for s in schools}
 
     # 2. Fetch only low-attendance students (< 60%) — much smaller than all 5000
-    low_students = (
+    student_query = (
         db.query(Student)
+        .join(School, Student.school_id == School.id)
         .filter(Student.attendance_rate < 60)
-        .order_by(Student.attendance_rate.asc())
+    )
+    if state:
+        student_query = student_query.filter(School.state == state)
+
+    low_students = (
+        student_query.order_by(Student.attendance_rate.asc())
         .limit(200)
         .all()
     )

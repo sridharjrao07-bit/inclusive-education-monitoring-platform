@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { fetchSchools, fetchStudents } from '../api';
+import { useAuth } from '../AuthContext';
 import { Search, MapPin, Filter, ChevronDown, Eye, X } from 'lucide-react';
 
 function ScoreBar({ value, max = 100 }) {
@@ -136,6 +137,7 @@ function SchoolDetail({ school, onClose }) {
 }
 
 export default function SchoolsPage() {
+  const { user, isStateAdmin } = useAuth();
   const [schools, setSchools] = useState([]);
   const [loading, setLoading] = useState(true);
   const [search, setSearch] = useState('');
@@ -145,8 +147,13 @@ export default function SchoolsPage() {
 
   useEffect(() => {
     const params = {};
-    if (stateFilter) params.state = stateFilter;
+    if (isStateAdmin && user?.state) {
+      params.state = user.state;
+    } else if (stateFilter) {
+      params.state = stateFilter;
+    }
     if (typeFilter) params.school_type = typeFilter;
+    if (search.trim()) params.search = search.trim();
     params.limit = 200;
 
     setLoading(true);
@@ -154,12 +161,7 @@ export default function SchoolsPage() {
       .then(setSchools)
       .catch(console.error)
       .finally(() => setLoading(false));
-  }, [stateFilter, typeFilter]);
-
-  const filtered = schools.filter(s =>
-    s.name.toLowerCase().includes(search.toLowerCase()) ||
-    s.district.toLowerCase().includes(search.toLowerCase())
-  );
+  }, [stateFilter, typeFilter, search, isStateAdmin, user?.state]);
 
   const states = [...new Set(schools.map(s => s.state))].sort();
 
@@ -182,9 +184,15 @@ export default function SchoolsPage() {
             id="school-search"
           />
         </div>
-        <select className="form-select w-44" value={stateFilter} onChange={e => setStateFilter(e.target.value)} id="state-filter">
-          <option value="">All States</option>
-          {states.map(st => <option key={st} value={st}>{st}</option>)}
+        <select className="form-select w-44" value={isStateAdmin ? user?.state : stateFilter} onChange={e => setStateFilter(e.target.value)} id="state-filter" disabled={isStateAdmin}>
+          {isStateAdmin ? (
+            <option value={user?.state}>{user?.state}</option>
+          ) : (
+            <>
+              <option value="">All States</option>
+              {states.map(st => <option key={st} value={st}>{st}</option>)}
+            </>
+          )}
         </select>
         <select className="form-select w-36" value={typeFilter} onChange={e => setTypeFilter(e.target.value)} id="type-filter">
           <option value="">All Types</option>
@@ -213,15 +221,15 @@ export default function SchoolsPage() {
                 </tr>
               </thead>
               <tbody>
-                {filtered.length === 0 ? (
+                {schools.length === 0 ? (
                   <tr><td colSpan={8} className="text-center py-10 text-slate-400">No schools found</td></tr>
-                ) : filtered.map(s => (
+                ) : schools.map(s => (
                   <tr
                     key={s.id}
                     onClick={() => setSelectedSchool(s)}
-                    className="cursor-pointer hover:bg-india-50/40"
+                    className="cursor-pointer hover:bg-white/5"
                   >
-                    <td className="font-semibold text-slate-800">{s.name}</td>
+                    <td className="font-semibold text-slate-200">{s.name}</td>
                     <td>{s.district}</td>
                     <td>{s.state}</td>
                     <td>

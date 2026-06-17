@@ -9,17 +9,16 @@ from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from dotenv import load_dotenv
 import os
-import base64
 
 # Load .env file (no-op if it doesn't exist)
 load_dotenv()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-_b64 = "cG9zdGdyZXNxbDovL3Bvc3RncmVzLmNqcGJxc2l1bWhkZXljd3ZueW9yOnAwemt0MDZDS05jVmFsWllAYXdzLTEtYXAtc291dGhlYXN0LTEucG9vbGVyLnN1cGFiYXNlLmNvbTo2NTQzL3Bvc3RncmVz"
-default_url = base64.b64decode(_b64).decode("utf-8")
-
-DATABASE_URL = os.getenv("DATABASE_URL", default_url)
+DATABASE_URL = os.getenv(
+    "DATABASE_URL",
+    f"sqlite:///{os.path.join(BASE_DIR, 'inclusive_education.db')}",
+)
 
 # SQLite requires check_same_thread=False; PostgreSQL does not
 connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}

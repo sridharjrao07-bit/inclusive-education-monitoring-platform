@@ -1,17 +1,25 @@
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy import func, case, text
+from sqlalchemy import func, case, text, or_
 from models import School, Facility, Student, Teacher, Feedback
 from schemas import SchoolCreate, StudentCreate, TeacherCreate, FeedbackCreate
 
 
 # ─── School CRUD ─────────────────────────────────────────
 def get_schools(db: Session, skip: int = 0, limit: int = 100,
-                state: str = None, school_type: str = None):
+                state: str = None, school_type: str = None, search: str = None):
     q = db.query(School).options(joinedload(School.facility))
     if state:
         q = q.filter(School.state == state)
     if school_type:
         q = q.filter(School.school_type == school_type)
+    if search:
+        term = f"%{search.strip()}%"
+        q = q.filter(or_(
+            School.name.ilike(term),
+            School.district.ilike(term),
+            School.state.ilike(term),
+            School.registration_code.ilike(term),
+        ))
     return q.offset(skip).limit(limit).all()
 
 

@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { fetchStats } from '../api';
+import API from '../api';
+import { useAuth } from '../AuthContext';
 import {
   School, Users, TrendingUp, Shield, AlertTriangle, Clock,
 } from 'lucide-react';
@@ -53,29 +55,30 @@ const CustomTooltip = ({ active, payload }) => {
 };
 
 export default function Dashboard() {
+  const { user, isStateAdmin } = useAuth();
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [chartsLoading, setChartsLoading] = useState(true);
 
   useEffect(() => {
+    const params = isStateAdmin && user?.state ? { state: user.state } : {};
+
     // Phase 1: Load fast summary (KPI cards) immediately
-    fetch('/api/stats/summary')
-      .then(r => r.json())
-      .then(data => {
-        setStats(data);
+    API.get('/stats/summary', { params })
+      .then(r => {
+        setStats(r.data);
         setLoading(false);
       })
       .catch(() => setLoading(false));
 
     // Phase 2: Load full stats (charts) in background
-    fetch('/api/stats')
-      .then(r => r.json())
+    fetchStats(params)
       .then(data => {
         setStats(data);
         setChartsLoading(false);
       })
       .catch(() => setChartsLoading(false));
-  }, []);
+  }, [isStateAdmin, user]);
 
   if (loading) {
     return (

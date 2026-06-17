@@ -78,7 +78,7 @@ export const createFeedback = (data) => API.post('/feedbacks', data).then(r => r
 
 // ─── AI ─────────────────────────────────────────
 export const sendNLQuery = (query) => API.post('/query', { query }).then(r => r.data);
-export const fetchAttendanceStats = () => API.get('/attendance-stats').then(r => r.data);
+export const fetchAttendanceStats = (params) => API.get('/attendance-stats', { params }).then(r => r.data);
 
 // ─── Data Ingestion ─────────────────────────────
 export const ingestCSV = (file) => {

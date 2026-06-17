@@ -1,9 +1,11 @@
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { useAuth } from '../AuthContext';
 import { fetchAttendanceStats, fetchStudents } from '../api';
 import { ArrowLeft, AlertTriangle, TrendingDown, Users, Clock, ChevronDown, ChevronUp } from 'lucide-react';
 
 export default function AttendancePage() {
+  const { user, isStateAdmin } = useAuth();
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState('all'); // all | low | critical
@@ -12,7 +14,8 @@ export default function AttendancePage() {
   const [loadingStudents, setLoadingStudents] = useState({});
 
   useEffect(() => {
-    fetchAttendanceStats()
+    const params = isStateAdmin && user?.state ? { state: user.state } : {};
+    fetchAttendanceStats(params)
       .then(setData)
       .catch(console.error)
       .finally(() => setLoading(false));
@@ -93,19 +96,19 @@ export default function AttendancePage() {
 
       {/* ── Summary Cards ── */}
       <div className="attendance-summary">
-        <div className="att-stat-card">
+        <div className={`att-stat-card cursor-pointer hover:bg-white/5 transition-colors ${filter === 'all' ? 'ring-2 ring-indigo-500 ring-offset-2 ring-offset-[#0f172a]' : ''}`} onClick={() => setFilter('all')}>
           <div className="att-stat-value" style={{ color: '#8b5cf6' }}>{summary.avg_attendance}%</div>
           <div className="att-stat-label">Average Attendance</div>
         </div>
-        <div className="att-stat-card">
+        <div className={`att-stat-card cursor-pointer hover:bg-white/5 transition-colors ${filter === 'all' ? 'ring-2 ring-emerald-500 ring-offset-2 ring-offset-[#0f172a]' : ''}`} onClick={() => setFilter('all')}>
           <div className="att-stat-value" style={{ color: '#138808' }}>{summary.good_count}</div>
           <div className="att-stat-label">Good (&ge; 60%)</div>
         </div>
-        <div className="att-stat-card">
+        <div className={`att-stat-card cursor-pointer hover:bg-white/5 transition-colors ${filter === 'low' ? 'ring-2 ring-orange-500 ring-offset-2 ring-offset-[#0f172a]' : ''}`} onClick={() => setFilter('low')}>
           <div className="att-stat-value" style={{ color: '#f97f10' }}>{summary.low_count}</div>
           <div className="att-stat-label">Low (&lt; 60%)</div>
         </div>
-        <div className="att-stat-card">
+        <div className={`att-stat-card cursor-pointer hover:bg-white/5 transition-colors ${filter === 'critical' ? 'ring-2 ring-red-500 ring-offset-2 ring-offset-[#0f172a]' : ''}`} onClick={() => setFilter('critical')}>
           <div className="att-stat-value" style={{ color: '#ef4444' }}>{summary.critical_count}</div>
           <div className="att-stat-label">Critical (&lt; 40%)</div>
         </div>
@@ -128,7 +131,7 @@ export default function AttendancePage() {
       {filteredSchools.map(school => (
         <div key={school.id} className="att-school-group">
           <div
-            className="att-school-header cursor-pointer hover:bg-slate-50 transition-colors"
+            className="att-school-header cursor-pointer hover:bg-white/5 transition-colors"
             onClick={() => toggleSchool(school.id)}
           >
             <div>

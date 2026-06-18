@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import func, case, text, or_
-from models import School, Facility, Student, Teacher, Feedback
+from models import School, Facility, Student, Teacher, Feedback, Notification
 from schemas import SchoolCreate, StudentCreate, TeacherCreate, FeedbackCreate
 
 
@@ -111,6 +111,54 @@ def create_feedback(db: Session, feedback: FeedbackCreate):
     db.commit()
     db.refresh(db_fb)
     return db_fb
+
+
+# ═══════════════════════════════════════════════════════════
+# NOTIFICATIONS
+# ═══════════════════════════════════════════════════════════
+def create_notification(db: Session, message: str, user_id: int = None, school_id: int = None, notification_type: str = "alert"):
+    notif = Notification(
+        user_id=user_id,
+        school_id=school_id,
+        message=message,
+        notification_type=notification_type
+    )
+    db.add(notif)
+    db.commit()
+    db.refresh(notif)
+    return notif
+
+def get_user_notifications(db: Session, user):
+    # Get notifications specifically for the user, or broadcast to their school, or global broadcast
+    query = db.query(Notification).filter(Notification.is_read == False)
+    
+    if user.role == "national_admin":
+        # National admin sees global broadcasts and maybe admin-specific alerts
+        query = query.filter(Notification.school_id == None)
+    elif user.role == "state_admin":
+        # Can filter by state or something similar, for simplicity let's give them state school alerts
+        # This might need a complex join, let's keep it simple: global or school_id in their state
+        if user.state:
+            query = query.join(School, Notification.school_id == School.id).filter(
+                (Notification.school_id == None) | (School.state == user.state)
+            )
+        else:
+            query = query.filter(Notification.school_id == None)
+    else:
+        # Teacher
+        query = query.filter(
+            (Notification.user_id == user.id) | 
+            (Notification.school_id == user.school_id)
+        )
+        
+    return query.order_by(Notification.created_at.desc()).limit(20).all()
+
+def mark_notification_read(db: Session, notification_id: int):
+    notif = db.query(Notification).filter(Notification.id == notification_id).first()
+    if notif:
+        notif.is_read = True
+        db.commit()
+    return notif
 
 
 # ─── Score Calculations ──────────────────────────────────

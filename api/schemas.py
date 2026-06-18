@@ -1,5 +1,5 @@
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional, List, Any
 from datetime import datetime
 
 
@@ -141,9 +141,27 @@ class NLQueryRequest(BaseModel):
 
 
 class NLQueryResponse(BaseModel):
-    query: str
-    answer: str
-    data: Optional[List[dict]] = None
+    response: str
+    visualization_type: Optional[str] = None
+    data: Optional[Any] = None
+
+class NotificationCreate(BaseModel):
+    user_id: Optional[int] = None
+    school_id: Optional[int] = None
+    message: str
+    notification_type: str = "alert"
+
+class NotificationOut(BaseModel):
+    id: int
+    user_id: Optional[int]
+    school_id: Optional[int]
+    message: str
+    notification_type: str
+    is_read: bool
+    created_at: datetime
+
+    class Config:
+        orm_mode = True
 
 
 class NewSchoolData(BaseModel):

@@ -107,3 +107,18 @@ class User(Base):
     created_at = Column(DateTime, default=datetime.datetime.utcnow)
 
     school = relationship("School")
+
+
+class Notification(Base):
+    __tablename__ = "notifications"
+
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    school_id = Column(Integer, ForeignKey("schools.id"), nullable=True)
+    message = Column(Text, nullable=False)
+    notification_type = Column(String, default="alert")
+    is_read = Column(Boolean, default=False)
+    created_at = Column(DateTime, default=datetime.datetime.utcnow)
+
+    user = relationship("User")
+    school = relationship("School")

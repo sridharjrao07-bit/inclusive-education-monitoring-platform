@@ -6,6 +6,7 @@ import {
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './AuthContext';
 import { seedAdmin } from './api';
+import NotificationBell from './components/NotificationBell';
 
 // Lazy-loaded pages — each becomes its own JS chunk
 const Dashboard      = lazy(() => import('./pages/Dashboard'));
@@ -144,12 +145,15 @@ function AppContent() {
             <h2>{current.title}</h2>
           </div>
         </div>
-        <div className="header-right">
+        <div className="header-right" style={{ display: 'flex', alignItems: 'center' }}>
           {isAuthenticated && (
-            <div className="header-badge">
-              {ROLE_LABELS[user?.role] || 'Authenticated'}
-              {user?.state ? ` · ${user.state}` : ''}
-            </div>
+            <>
+              <NotificationBell />
+              <div className="header-badge">
+                {ROLE_LABELS[user?.role] || 'Authenticated'}
+                {user?.state ? ` · ${user.state}` : ''}
+              </div>
+            </>
           )}
         </div>
       </header>

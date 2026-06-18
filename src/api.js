@@ -76,6 +76,34 @@ export const createTeacher = (data) => API.post('/teachers', data).then(r => r.d
 export const fetchFeedbacks = (params) => API.get('/feedbacks', { params }).then(r => r.data);
 export const createFeedback = (data) => API.post('/feedbacks', data).then(r => r.data);
 
+// ─── Notifications ──────────────────────────────
+export const getNotifications = async () => {
+  const response = await API.get('/notifications');
+  return response.data;
+};
+
+export const markNotificationRead = async (id) => {
+  const response = await API.post(`/notifications/${id}/read`);
+  return response.data;
+};
+
+// ─── Reports ────────────────────────────────────
+export const downloadSchoolsReport = async (state) => {
+  const response = await API.get('/reports/schools', {
+    params: state ? { state } : {},
+    responseType: 'blob'
+  });
+  return response.data;
+};
+
+export const downloadStudentsReport = async (schoolId) => {
+  const response = await API.get('/reports/students', {
+    params: schoolId ? { school_id: schoolId } : {},
+    responseType: 'blob'
+  });
+  return response.data;
+};
+
 // ─── AI ─────────────────────────────────────────
 export const sendNLQuery = (query) => API.post('/query', { query }).then(r => r.data);
 export const fetchAttendanceStats = (params) => API.get('/attendance-stats', { params }).then(r => r.data);

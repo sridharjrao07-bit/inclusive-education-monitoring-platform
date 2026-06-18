@@ -9,3 +9,4 @@ passlib[bcrypt]
 bcrypt<4.0.0
 psycopg2-binary
 httpx
+fpdf2

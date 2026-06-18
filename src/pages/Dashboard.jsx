@@ -10,6 +10,7 @@ import {
   PieChart, Pie, Cell, ResponsiveContainer, Tooltip,
   BarChart, Bar, XAxis, YAxis, CartesianGrid,
 } from 'recharts';
+import { downloadSchoolsReport, downloadStudentsReport } from '../api';
 
 const COLORS = ['#2b4acb', '#f97f10', '#138808', '#ef4444', '#3b82f6', '#f59e0b', '#8b5cf6', '#ec4899'];
 
@@ -102,12 +103,37 @@ export default function Dashboard() {
   const categoryData = chartsLoading ? [] : Object.entries(stats.category_distribution || {}).map(([name, value]) => ({ name, value }));
   const stateData = chartsLoading ? [] : (stats.state_wise_inclusion || []);
 
+  const handleDownload = async (type) => {
+    try {
+      const blob = type === 'schools' ? await downloadSchoolsReport(isStateAdmin ? user.state : null) : await downloadStudentsReport();
+      const url = window.URL.createObjectURL(new Blob([blob], { type: 'application/pdf' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `${type}_report.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.parentNode.removeChild(link);
+    } catch (err) {
+      console.error("Failed to download report", err);
+      alert("Failed to download report. Please try again.");
+    }
+  };
 
   return (
     <div className="fade-in">
 
       {/* ── SECTION: Overview ── */}
-      <div className="section-title">Overview</div>
+      <div className="section-title" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <span>Overview</span>
+        <div style={{ display: 'flex', gap: '0.5rem' }}>
+          {(user?.role === 'national_admin' || user?.role === 'state_admin') && (
+             <button className="btn btn-outline" style={{ fontSize: '0.85rem', padding: '0.4rem 0.8rem' }} onClick={() => handleDownload('schools')}>Export Schools PDF</button>
+          )}
+          {(user?.role === 'national_admin' || user?.role === 'state_admin' || user?.role === 'teacher') && (
+             <button className="btn btn-outline" style={{ fontSize: '0.85rem', padding: '0.4rem 0.8rem' }} onClick={() => handleDownload('students')}>Export Students PDF</button>
+          )}
+        </div>
+      </div>
       <div className="kpi-grid">
         <Link to="/schools" className="kpi-card-link">
           <KpiCard icon={School} label="Total Schools" value={stats.total_schools}

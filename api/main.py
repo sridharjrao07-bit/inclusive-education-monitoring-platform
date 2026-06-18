@@ -22,6 +22,7 @@ from schemas import (
     FeedbackCreate, FeedbackOut, UserCreate, UserOut, Token,
     NLQueryRequest, NLQueryResponse
 )
+import schemas
 import crud
 import ai_service
 from adapters.csv_adapter import CSVAdapter
@@ -566,6 +567,15 @@ def create_student(
     if current_user.role == "teacher" and current_user.school_id != student.school_id:
         raise HTTPException(status_code=403, detail="You can only add students to your own school")
     result = crud.create_student(db, student)
+    
+    if result.dropout_risk >= 60:
+        crud.create_notification(
+            db=db,
+            message=f"High dropout risk ({result.dropout_risk:.1f}%) detected for newly added student {result.name} in grade {result.grade_level}.",
+            school_id=result.school_id,
+            notification_type="alert"
+        )
+    
     crud.recalculate_school_scores(db, student.school_id)
     return result
 
@@ -621,6 +631,123 @@ def nl_query(
     result = ai_service.process_nl_query(req.query, db)
     return result
 
+
+# ═══════════════════════════════════════════════════════════
+# NOTIFICATIONS
+# ═══════════════════════════════════════════════════════════
+@app.get("/api/notifications", response_model=list[schemas.NotificationOut])
+def get_notifications(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    return crud.get_user_notifications(db, current_user)
+
+@app.post("/api/notifications/{notification_id}/read", response_model=schemas.NotificationOut)
+def mark_notification_read(
+    notification_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    notif = crud.mark_notification_read(db, notification_id)
+    if not notif:
+        raise HTTPException(status_code=404, detail="Notification not found")
+    return notif
+
+
+# ═══════════════════════════════════════════════════════════
+# REPORTS (PDF)
+# ═══════════════════════════════════════════════════════════
+from fastapi.responses import Response
+import io
+from fpdf import FPDF
+
+@app.get("/api/reports/schools")
+def export_schools_report(
+    state: str = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin)
+):
+    schools = crud.get_schools(db, limit=1000, state=state)
+    
+    pdf = FPDF()
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=16)
+    pdf.cell(200, 10, txt="Schools Report", ln=1, align="C")
+    
+    pdf.set_font("Helvetica", size=10)
+    pdf.ln(10)
+    
+    # Table Header
+    pdf.set_fill_color(200, 220, 255)
+    pdf.cell(50, 10, "Name", border=1, fill=True)
+    pdf.cell(40, 10, "District", border=1, fill=True)
+    pdf.cell(40, 10, "State", border=1, fill=True)
+    pdf.cell(30, 10, "Students", border=1, fill=True)
+    pdf.cell(30, 10, "Inc. Score", border=1, fill=True)
+    pdf.ln()
+    
+    for s in schools:
+        pdf.cell(50, 10, s.name[:25], border=1)
+        pdf.cell(40, 10, s.district[:20], border=1)
+        pdf.cell(40, 10, s.state[:20], border=1)
+        pdf.cell(30, 10, str(s.total_students), border=1)
+        pdf.cell(30, 10, f"{s.inclusion_score:.1f}", border=1)
+        pdf.ln()
+
+    pdf_bytes = pdf.output()
+    return Response(content=bytes(pdf_bytes), media_type="application/pdf", headers={"Content-Disposition": "attachment; filename=schools_report.pdf"})
+
+@app.get("/api/reports/students")
+def export_students_report(
+    school_id: int = Query(None),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_teacher_or_admin)
+):
+    # If teacher, enforce their own school
+    if current_user.role == "teacher":
+        if school_id and school_id != current_user.school_id:
+            raise HTTPException(status_code=403, detail="You can only export your own school's data")
+        school_id = current_user.school_id
+
+    students = crud.get_students(db, school_id=school_id, limit=5000)
+    
+    pdf = FPDF(orientation='L') # Landscape for more columns
+    pdf.add_page()
+    pdf.set_font("Helvetica", size=16)
+    pdf.cell(0, 10, txt="Students Report", ln=1, align="C")
+    
+    pdf.set_font("Helvetica", size=10)
+    pdf.ln(10)
+    
+    # Table Header
+    pdf.set_fill_color(200, 220, 255)
+    pdf.cell(50, 10, "Name", border=1, fill=True)
+    pdf.cell(30, 10, "Gender", border=1, fill=True)
+    pdf.cell(40, 10, "Category", border=1, fill=True)
+    pdf.cell(40, 10, "Disability", border=1, fill=True)
+    pdf.cell(30, 10, "Attendance", border=1, fill=True)
+    pdf.cell(30, 10, "Academic", border=1, fill=True)
+    pdf.cell(30, 10, "Risk Score", border=1, fill=True)
+    pdf.ln()
+    
+    for st in students:
+        pdf.cell(50, 10, st.name[:25], border=1)
+        pdf.cell(30, 10, st.gender, border=1)
+        pdf.cell(40, 10, st.category, border=1)
+        pdf.cell(40, 10, st.disability_type[:20], border=1)
+        pdf.cell(30, 10, f"{st.attendance_rate:.1f}%", border=1)
+        pdf.cell(30, 10, f"{st.academic_score:.1f}", border=1)
+        
+        # Highlight high risk
+        if st.dropout_risk >= 60:
+            pdf.set_text_color(255, 0, 0)
+        pdf.cell(30, 10, f"{st.dropout_risk:.1f}", border=1)
+        pdf.set_text_color(0, 0, 0) # reset
+        
+        pdf.ln()
+
+    pdf_bytes = pdf.output()
+    return Response(content=bytes(pdf_bytes), media_type="application/pdf", headers={"Content-Disposition": "attachment; filename=students_report.pdf"})
 
 # ═══════════════════════════════════════════════════════════
 # AI / DROPOUT RISK FOR A SPECIFIC STUDENT
@@ -744,6 +871,15 @@ def _process_ingestion(records: list, db: Session):
                 )
                 db.add(student)
                 students_created += 1
+
+                # Generate notification if high risk
+                if risk >= 60:
+                    crud.create_notification(
+                        db=db,
+                        message=f"High dropout risk ({risk:.1f}%) detected for student {r['student_name']} in grade {r.get('grade_level', 1)}.",
+                        school_id=school_id,
+                        notification_type="alert"
+                    )
 
     db.commit()
     

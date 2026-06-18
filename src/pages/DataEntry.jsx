@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createSchool, createStudent, createTeacher, createFeedback, updateFacility, fetchSchools } from '../api';
-import { CheckCircle, AlertCircle, School, Users, GraduationCap, MessageSquare, Wrench } from 'lucide-react';
+import { CheckCircle, AlertCircle, School, Users, GraduationCap, MessageSquare, Wrench, Lock } from 'lucide-react';
+import { useAuth } from '../AuthContext';
 
 function Toast({ message, type, onDone }) {
   useEffect(() => {
@@ -368,23 +369,36 @@ function FacilityForm({ schools, showToast }) {
 
 // ─── Main DataEntry Page ────────────────────────────────
 export default function DataEntry() {
-  const [tab, setTab] = useState('school');
+  const [tab, setTab] = useState(null); // null until we know user's role
   const [schools, setSchools] = useState([]);
   const [toast, setToast] = useState(null);
+  const { user, isAdmin, isStateAdmin, isTeacher } = useAuth();
+
+  // Determine which tabs this role can access
+  const isAdminUser = isAdmin || isStateAdmin;
+
+  const allTabs = [
+    { id: 'school',   label: 'New School',      icon: School,        adminOnly: true  },
+    { id: 'student',  label: 'Enroll Student',  icon: Users,         adminOnly: false },
+    { id: 'teacher',  label: 'Add Teacher',     icon: GraduationCap, adminOnly: true  },
+    { id: 'feedback', label: 'Feedback',        icon: MessageSquare, adminOnly: false },
+    { id: 'facility', label: 'Facility',        icon: Wrench,        adminOnly: false },
+  ];
+
+  const tabs = allTabs.filter(t => isAdminUser || !t.adminOnly);
+
+  // Set the default visible tab once we know the role
+  useEffect(() => {
+    if (tab === null && tabs.length > 0) {
+      setTab(tabs[0].id);
+    }
+  }, [user]);
 
   useEffect(() => {
     fetchSchools({ limit: 500 }).then(setSchools).catch(console.error);
   }, []);
 
   const showToast = (message, type) => setToast({ message, type });
-
-  const tabs = [
-    { id: 'school', label: 'New School', icon: School },
-    { id: 'student', label: 'Enroll Student', icon: Users },
-    { id: 'teacher', label: 'Add Teacher', icon: GraduationCap },
-    { id: 'feedback', label: 'Feedback', icon: MessageSquare },
-    { id: 'facility', label: 'Facility', icon: Wrench },
-  ];
 
   return (
     <div className="fade-in">
@@ -394,6 +408,21 @@ export default function DataEntry() {
           <p>Add schools, enroll students, update facilities</p>
         </div>
       </div>
+
+      {/* Role notice for teachers */}
+      {isTeacher && (
+        <div style={{
+          display: 'flex', alignItems: 'center', gap: '0.6rem',
+          padding: '0.75rem 1rem', marginBottom: '1rem',
+          background: 'rgba(59,130,246,0.07)', border: '1px solid rgba(59,130,246,0.2)',
+          borderRadius: '0.75rem', fontSize: '0.8rem', color: '#3b6fd4'
+        }}>
+          <Lock size={14} style={{ flexShrink: 0 }} />
+          <span>
+            <strong>Teacher access:</strong> You can enroll students, submit feedback, and update facilities for your own school. School creation and teacher management are restricted to administrators.
+          </span>
+        </div>
+      )}
 
       <div className="card">
         <div className="tab-bar">
@@ -409,9 +438,9 @@ export default function DataEntry() {
           ))}
         </div>
 
-        {tab === 'school'   && <SchoolForm schools={schools} setSchools={setSchools} showToast={showToast} />}
+        {tab === 'school'   && isAdminUser && <SchoolForm schools={schools} setSchools={setSchools} showToast={showToast} />}
         {tab === 'student'  && <StudentForm schools={schools} showToast={showToast} />}
-        {tab === 'teacher'  && <TeacherForm schools={schools} showToast={showToast} />}
+        {tab === 'teacher'  && isAdminUser && <TeacherForm schools={schools} showToast={showToast} />}
         {tab === 'feedback' && <FeedbackForm schools={schools} showToast={showToast} />}
         {tab === 'facility' && <FacilityForm schools={schools} showToast={showToast} />}
       </div>

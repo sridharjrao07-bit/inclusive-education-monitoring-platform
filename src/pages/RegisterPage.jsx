@@ -253,8 +253,10 @@ export default function RegisterPage() {
             <select className="form-select" value={role} onChange={e => { setRole(e.target.value); setVerifiedSchool(null); setSchoolCode(''); }}>
               <option value="student">Student</option>
               <option value="teacher">Teacher (or School Administrator)</option>
-              <option value="admin">National Admin</option>
             </select>
+            <p className="text-[11px] text-slate-400 mt-1.5">
+              🔒 National Admin and State Admin accounts are provisioned by system administrators only and cannot be self-registered.
+            </p>
           </div>
 
           {/* STUDENT — always join by code */}

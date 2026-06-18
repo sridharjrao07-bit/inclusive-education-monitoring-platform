@@ -125,4 +125,24 @@ export const ingestJSON = (file) => {
   }).then(r => r.data);
 };
 
+// ─── Admin User Management (national_admin only) ──
+export const adminCreateUser = (data) =>
+  AuthAPI.post('/admin/create-user', data).then(r => r.data);
+
+export const adminListUsers = () =>
+  AuthAPI.get('/admin/users').then(r => r.data);
+
+export const adminToggleUserActive = (userId) =>
+  AuthAPI.patch(`/admin/users/${userId}/toggle-active`).then(r => r.data);
+
+// ─── State Admin User Management (state_admin only) ──
+export const stateAdminCreateTeacher = (data) =>
+  AuthAPI.post('/state-admin/create-teacher', data).then(r => r.data);
+
+export const stateAdminListUsers = () =>
+  AuthAPI.get('/state-admin/users').then(r => r.data);
+
+export const stateAdminToggleUserActive = (userId) =>
+  AuthAPI.patch(`/state-admin/users/${userId}/toggle-active`).then(r => r.data);
+
 export default API;

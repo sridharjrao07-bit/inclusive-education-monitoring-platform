@@ -130,7 +130,19 @@ def register(user_data: UserCreate, db: Session = Depends(get_db)):
     if db.query(User).filter(User.email == user_data.email).first():
         raise HTTPException(status_code=400, detail="Email already registered")
 
-    # Validate state_admin must have a state
+    # ── Security: Block privileged role self-registration ──────────────────
+    # national_admin, state_admin, and the legacy "admin" role MUST be created
+    # directly by an existing admin (e.g. via the seed endpoint or a future
+    # admin-only management API). They cannot be self-registered via this endpoint.
+    PRIVILEGED_ROLES = ("national_admin", "state_admin", "admin")
+    if user_data.role in PRIVILEGED_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail="Privileged roles (national_admin, state_admin) cannot be self-registered. "
+                   "Please contact your system administrator to have your account created.",
+        )
+
+    # Validate state_admin must have a state (kept for any future admin-creation flow)
     if user_data.role == "state_admin" and not user_data.state:
         raise HTTPException(status_code=400, detail="State admins must be assigned a state")
         
@@ -339,6 +351,239 @@ def seed_admin(db: Session = Depends(get_db)):
         db.add(user)
     db.commit()
     return {"message": "Default users created", "users": [d["username"] for d in defaults]}
+
+
+# ═══════════════════════════════════════════════════════════
+# ADMIN USER MANAGEMENT  (national_admin only)
+# ═══════════════════════════════════════════════════════════
+class AdminUserCreate(schemas.BaseModel if hasattr(schemas, 'BaseModel') else object):
+    pass
+
+from pydantic import BaseModel as _PydanticBase, EmailStr as _EmailStr
+
+class AdminCreateUserRequest(_PydanticBase):
+    username: str
+    email: str
+    password: str
+    role: str          # "national_admin" | "state_admin" | "teacher"
+    state: Optional[str] = None   # Required for state_admin
+
+class AdminUserOut(_PydanticBase):
+    id: int
+    username: str
+    email: str
+    role: str
+    state: Optional[str]
+    is_active: bool
+
+    class Config:
+        from_attributes = True
+
+
+@app.post("/auth/admin/create-user", response_model=AdminUserOut)
+def admin_create_user(
+    body: AdminCreateUserRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_national_admin),
+):
+    """
+    National Admin only — create a new user of any role.
+    This is the proper way to provision national_admin / state_admin accounts
+    without exposing the operation to the public registration form.
+    """
+    ALLOWED_ROLES = ("national_admin", "state_admin", "teacher")
+    if body.role not in ALLOWED_ROLES:
+        raise HTTPException(status_code=400, detail=f"Invalid role. Must be one of: {ALLOWED_ROLES}")
+
+    if body.role == "state_admin" and not body.state:
+        raise HTTPException(status_code=400, detail="State admins must be assigned a state")
+
+    body.username = body.username.strip()
+    body.email = body.email.strip().lower()
+
+    if db.query(User).filter(User.username == body.username).first():
+        raise HTTPException(status_code=400, detail="Username already taken")
+    if db.query(User).filter(User.email == body.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    new_user = User(
+        username=body.username,
+        email=body.email,
+        hashed_password=hash_password(body.password),
+        role=body.role,
+        state=body.state,
+        school_id=None,
+        is_active=True,
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return new_user
+
+
+@app.get("/auth/admin/users", response_model=list[AdminUserOut])
+def admin_list_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_national_admin),
+):
+    """National Admin only — list all registered users."""
+    return db.query(User).order_by(User.created_at.desc()).all()
+
+
+@app.patch("/auth/admin/users/{user_id}/toggle-active")
+def admin_toggle_user_active(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_national_admin),
+):
+    """National Admin only — activate or deactivate a user account."""
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
+    target.is_active = not target.is_active
+    db.commit()
+    return {"id": target.id, "username": target.username, "is_active": target.is_active}
+
+
+
+
+
+# ═══════════════════════════════════════════════════════════
+# STATE ADMIN USER MANAGEMENT  (state_admin only, scoped to their state)
+# ═══════════════════════════════════════════════════════════
+from auth import require_admin as _require_admin  # already imported, no-op
+
+from pydantic import BaseModel as _SA_Base
+
+class StateAdminCreateTeacherRequest(_SA_Base):
+    username: str
+    email: str
+    password: str
+    school_code: Optional[str] = None   # must be a school in their state
+
+
+@app.post("/auth/state-admin/create-teacher")
+def state_admin_create_teacher(
+    body: StateAdminCreateTeacherRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    State Admin only — create a teacher account for a school in their state.
+    Optionally links the teacher to an existing school via school_code.
+    """
+    if current_user.role not in ("state_admin", "national_admin", "admin"):
+        raise HTTPException(status_code=403, detail="State admin access required")
+
+    body.username = body.username.strip()
+    body.email = body.email.strip().lower()
+
+    if db.query(User).filter(User.username == body.username).first():
+        raise HTTPException(status_code=400, detail="Username already taken")
+    if db.query(User).filter(User.email == body.email).first():
+        raise HTTPException(status_code=400, detail="Email already registered")
+
+    school_id = None
+    if body.school_code:
+        school_code = normalize_school_code(body.school_code)
+        school = db.query(School).filter(School.registration_code == school_code).first()
+        if not school:
+            raise HTTPException(status_code=404, detail="Invalid school code")
+        # State admins can only assign to schools in their own state
+        if current_user.role == "state_admin" and school.state != current_user.state:
+            raise HTTPException(
+                status_code=403,
+                detail=f"School is not in your state ({current_user.state})"
+            )
+        school_id = school.id
+
+    new_user = User(
+        username=body.username,
+        email=body.email,
+        hashed_password=hash_password(body.password),
+        role="teacher",
+        state=current_user.state if current_user.role == "state_admin" else None,
+        school_id=school_id,
+        is_active=True,
+    )
+    db.add(new_user)
+    db.commit()
+    db.refresh(new_user)
+    return {
+        "id": new_user.id,
+        "username": new_user.username,
+        "email": new_user.email,
+        "role": new_user.role,
+        "state": new_user.state,
+        "school_id": new_user.school_id,
+        "is_active": new_user.is_active,
+    }
+
+
+@app.get("/auth/state-admin/users")
+def state_admin_list_users(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """State Admin only — list all teachers/users within their state."""
+    if current_user.role not in ("state_admin", "national_admin", "admin"):
+        raise HTTPException(status_code=403, detail="State admin access required")
+
+    query = db.query(User)
+    # state_admin can only see their own state's users (joined to a school in that state)
+    if current_user.role == "state_admin":
+        state_school_ids = [
+            s.id for s in db.query(School).filter(School.state == current_user.state).all()
+        ]
+        query = query.filter(
+            (User.school_id.in_(state_school_ids)) |
+            (User.state == current_user.state)
+        )
+
+    users = query.order_by(User.created_at.desc()).all()
+    return [
+        {
+            "id": u.id,
+            "username": u.username,
+            "email": u.email,
+            "role": u.role,
+            "state": u.state,
+            "school_id": u.school_id,
+            "is_active": u.is_active,
+        }
+        for u in users
+    ]
+
+
+@app.patch("/auth/state-admin/users/{user_id}/toggle-active")
+def state_admin_toggle_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """State Admin only — enable/disable a teacher account in their state."""
+    if current_user.role not in ("state_admin", "national_admin", "admin"):
+        raise HTTPException(status_code=403, detail="State admin access required")
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
+
+    # State admin can only manage users within their state
+    if current_user.role == "state_admin":
+        school = db.query(School).filter(School.id == target.school_id).first()
+        if target.role in ("national_admin", "state_admin"):
+            raise HTTPException(status_code=403, detail="You cannot manage admin accounts")
+        if school and school.state != current_user.state:
+            raise HTTPException(status_code=403, detail="This user is not in your state")
+
+    target.is_active = not target.is_active
+    db.commit()
+    return {"id": target.id, "username": target.username, "is_active": target.is_active}
 
 
 # ═══════════════════════════════════════════════════════════

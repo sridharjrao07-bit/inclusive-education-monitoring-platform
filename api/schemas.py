@@ -141,8 +141,7 @@ class NLQueryRequest(BaseModel):
 
 
 class NLQueryResponse(BaseModel):
-    response: str
-    visualization_type: Optional[str] = None
+    answer: str
     data: Optional[Any] = None
 
 class NotificationCreate(BaseModel):

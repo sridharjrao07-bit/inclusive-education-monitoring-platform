@@ -447,6 +447,22 @@ def admin_toggle_user_active(
     return {"id": target.id, "username": target.username, "is_active": target.is_active}
 
 
+@app.delete("/auth/admin/users/{user_id}")
+def admin_delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_national_admin),
+):
+    """National Admin only — permanently delete a user account."""
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+    username = target.username
+    db.delete(target)
+    db.commit()
+    return {"deleted": True, "username": username}
 
 
 
@@ -527,12 +543,15 @@ def state_admin_list_users(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    """State Admin only — list all teachers/users within their state."""
+    """State Admin only — list teachers/users within their state.
+    national_admin accounts are NEVER returned regardless of caller role.
+    """
     if current_user.role not in ("state_admin", "national_admin", "admin"):
         raise HTTPException(status_code=403, detail="State admin access required")
 
-    query = db.query(User)
-    # state_admin can only see their own state's users (joined to a school in that state)
+    # ── Always exclude national_admin rows from this view ────────────────
+    query = db.query(User).filter(User.role != "national_admin")
+
     if current_user.role == "state_admin":
         state_school_ids = [
             s.id for s in db.query(School).filter(School.state == current_user.state).all()
@@ -573,17 +592,96 @@ def state_admin_toggle_user(
     if target.id == current_user.id:
         raise HTTPException(status_code=400, detail="You cannot deactivate your own account")
 
-    # State admin can only manage users within their state
+    # ── Hard block: national_admin is ALWAYS off-limits, regardless of caller ──
+    if target.role == "national_admin":
+        raise HTTPException(
+            status_code=403,
+            detail="National admin accounts cannot be managed through this endpoint"
+        )
+
+    # ── State admin: additional scoping restrictions ────────────────────────
     if current_user.role == "state_admin":
+        # Cannot act on another state_admin (same level)
+        if target.role == "state_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="State admins cannot manage other state admin accounts"
+            )
+        # Must be in the same state
         school = db.query(School).filter(School.id == target.school_id).first()
-        if target.role in ("national_admin", "state_admin"):
-            raise HTTPException(status_code=403, detail="You cannot manage admin accounts")
         if school and school.state != current_user.state:
-            raise HTTPException(status_code=403, detail="This user is not in your state")
+            raise HTTPException(
+                status_code=403,
+                detail="This user is not associated with a school in your state"
+            )
+        if target.state and target.state != current_user.state:
+            raise HTTPException(
+                status_code=403,
+                detail="This user belongs to a different state"
+            )
 
     target.is_active = not target.is_active
     db.commit()
     return {"id": target.id, "username": target.username, "is_active": target.is_active}
+
+
+@app.delete("/auth/state-admin/users/{user_id}")
+def state_admin_delete_user(
+    user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """State Admin only — permanently delete a teacher in their state.
+
+    Security layers (applied in order, no bypass possible):
+      1. Caller must be state_admin / national_admin
+      2. Target national_admin → ALWAYS blocked (even for national_admin callers on this endpoint)
+      3. Target state_admin → blocked for state_admin callers
+      4. State boundary → target school must be in caller's state
+      5. State field check → target.state must match caller's state
+    """
+    if current_user.role not in ("state_admin", "national_admin", "admin"):
+        raise HTTPException(status_code=403, detail="State admin access required")
+
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="User not found")
+    if target.id == current_user.id:
+        raise HTTPException(status_code=400, detail="You cannot delete your own account")
+
+    # ── Layer 1: national_admin is ALWAYS protected on this endpoint ──
+    if target.role == "national_admin":
+        raise HTTPException(
+            status_code=403,
+            detail="National admin accounts can only be removed directly from the database"
+        )
+
+    # ── Layer 2–4: state_admin caller restrictions ─────────────────────
+    if current_user.role == "state_admin":
+        # Cannot delete other state_admins
+        if target.role == "state_admin":
+            raise HTTPException(
+                status_code=403,
+                detail="State admins cannot delete other state admin accounts"
+            )
+        # State boundary check via school
+        school = db.query(School).filter(School.id == target.school_id).first()
+        if school and school.state != current_user.state:
+            raise HTTPException(
+                status_code=403,
+                detail=f"This user belongs to a school in '{school.state}', not '{current_user.state}'"
+            )
+        # State boundary check via user.state field
+        if target.state and target.state != current_user.state:
+            raise HTTPException(
+                status_code=403,
+                detail=f"This user is assigned to '{target.state}', not '{current_user.state}'"
+            )
+
+    username = target.username
+    db.delete(target)
+    db.commit()
+    return {"deleted": True, "username": username}
 
 
 # ═══════════════════════════════════════════════════════════

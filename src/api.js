@@ -135,6 +135,9 @@ export const adminListUsers = () =>
 export const adminToggleUserActive = (userId) =>
   AuthAPI.patch(`/admin/users/${userId}/toggle-active`).then(r => r.data);
 
+export const adminDeleteUser = (userId) =>
+  AuthAPI.delete(`/admin/users/${userId}`).then(r => r.data);
+
 // ─── State Admin User Management (state_admin only) ──
 export const stateAdminCreateTeacher = (data) =>
   AuthAPI.post('/state-admin/create-teacher', data).then(r => r.data);
@@ -144,5 +147,8 @@ export const stateAdminListUsers = () =>
 
 export const stateAdminToggleUserActive = (userId) =>
   AuthAPI.patch(`/state-admin/users/${userId}/toggle-active`).then(r => r.data);
+
+export const stateAdminDeleteUser = (userId) =>
+  AuthAPI.delete(`/state-admin/users/${userId}`).then(r => r.data);
 
 export default API;

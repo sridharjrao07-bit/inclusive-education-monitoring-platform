@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { useAuth } from '../AuthContext';
 import { Navigate } from 'react-router-dom';
-import { stateAdminCreateTeacher, stateAdminListUsers, stateAdminToggleUserActive, fetchSchools } from '../api';
+import { stateAdminCreateTeacher, stateAdminListUsers, stateAdminToggleUserActive, stateAdminDeleteUser, fetchSchools } from '../api';
 import {
   MapPin, UserPlus, Users, CheckCircle, AlertCircle,
-  Eye, EyeOff, ToggleLeft, ToggleRight, Lock, Search
+  Eye, EyeOff, ToggleLeft, ToggleRight, Lock, Search, Trash2, AlertTriangle, X
 } from 'lucide-react';
 
 const ROLE_LABELS = { teacher: 'Teacher', state_admin: 'State Admin', national_admin: 'National Admin' };
@@ -20,6 +20,51 @@ function Toast({ message, type, onDone }) {
     <div className={`toast toast-${type}`}>
       {type === 'success' ? <CheckCircle size={15} /> : <AlertCircle size={15} />}
       {message}
+    </div>
+  );
+}
+
+// ─── Confirmation Modal ─────────────────────────────────────
+function ConfirmModal({ title, message, confirmLabel, confirmStyle, onConfirm, onCancel, loading }) {
+  return (
+    <div style={{
+      position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)',
+      display: 'flex', alignItems: 'center', justifyContent: 'center',
+      zIndex: 9999, backdropFilter: 'blur(3px)',
+    }}>
+      <div style={{
+        background: '#fff', borderRadius: '1rem', padding: '2rem',
+        maxWidth: 420, width: '90%', boxShadow: '0 20px 60px rgba(0,0,0,0.2)',
+      }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 12, marginBottom: 12 }}>
+          <div style={{
+            width: 40, height: 40, borderRadius: '50%', flexShrink: 0,
+            background: confirmStyle === 'danger' ? 'rgba(239,68,68,0.1)' : 'rgba(249,115,22,0.1)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+          }}>
+            <AlertTriangle size={20} color={confirmStyle === 'danger' ? '#dc2626' : '#ea580c'} />
+          </div>
+          <h3 style={{ margin: 0, fontSize: '1rem', fontWeight: 700, color: '#1e293b' }}>{title}</h3>
+        </div>
+        <p style={{ margin: '0 0 1.5rem', fontSize: '0.875rem', color: '#64748b', lineHeight: 1.6 }}>
+          {message}
+        </p>
+        <div style={{ display: 'flex', gap: 10, justifyContent: 'flex-end' }}>
+          <button className="btn btn-secondary" onClick={onCancel} disabled={loading} style={{ fontSize: '0.85rem' }}>
+            <X size={14} /> Cancel
+          </button>
+          <button className="btn" onClick={onConfirm} disabled={loading} style={{
+            fontSize: '0.85rem', background: confirmStyle === 'danger' ? '#dc2626' : '#ea580c',
+            color: '#fff', border: 'none', display: 'flex', alignItems: 'center', gap: 6,
+          }}>
+            {loading
+              ? <span className="spinner" style={{ width: 14, height: 14 }} />
+              : confirmStyle === 'danger' ? <Trash2 size={14} /> : <ToggleLeft size={14} />
+            }
+            {loading ? 'Working…' : confirmLabel}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -160,9 +205,10 @@ function CreateTeacherForm({ onCreated, showToast, currentState }) {
   );
 }
 
-// ─── Users Table ────────────────────────────────────────
+// ─── Users Table ─────────────────────────────────────
 function UsersTable({ users, setUsers, showToast, currentUserId }) {
-  const [toggling, setToggling] = useState(null);
+  const [actionLoading, setActionLoading] = useState(null);
+  const [confirm, setConfirm] = useState(null); // { type: 'toggle'|'delete', user }
   const [search, setSearch] = useState('');
 
   const filtered = users.filter(u =>
@@ -170,24 +216,52 @@ function UsersTable({ users, setUsers, showToast, currentUserId }) {
     u.email.toLowerCase().includes(search.toLowerCase())
   );
 
-  const handleToggle = async (userId) => {
-    setToggling(userId);
+  const handleToggle = async () => {
+    const u = confirm.user;
+    setActionLoading(u.id);
     try {
-      const res = await stateAdminToggleUserActive(userId);
-      setUsers(prev => prev.map(u => u.id === userId ? { ...u, is_active: res.is_active } : u));
-      showToast(
-        `User '${res.username}' ${res.is_active ? 'activated' : 'deactivated'}.`,
-        res.is_active ? 'success' : 'error'
-      );
+      const res = await stateAdminToggleUserActive(u.id);
+      setUsers(prev => prev.map(x => x.id === u.id ? { ...x, is_active: res.is_active } : x));
+      showToast(`'${res.username}' ${res.is_active ? 'enabled' : 'disabled'}.`, res.is_active ? 'success' : 'error');
     } catch (err) {
-      showToast(err.response?.data?.detail || 'Failed to toggle user status', 'error');
+      showToast(err.response?.data?.detail || 'Failed to update status', 'error');
     } finally {
-      setToggling(null);
+      setActionLoading(null);
+      setConfirm(null);
+    }
+  };
+
+  const handleDelete = async () => {
+    const u = confirm.user;
+    setActionLoading(u.id);
+    try {
+      await stateAdminDeleteUser(u.id);
+      setUsers(prev => prev.filter(x => x.id !== u.id));
+      showToast(`User '${u.username}' permanently deleted.`, 'error');
+    } catch (err) {
+      showToast(err.response?.data?.detail || 'Failed to delete user', 'error');
+    } finally {
+      setActionLoading(null);
+      setConfirm(null);
     }
   };
 
   return (
     <>
+      {confirm && (
+        <ConfirmModal
+          title={confirm.type === 'delete' ? 'Delete User' : 'Confirm Action'}
+          message={confirm.type === 'delete' 
+            ? `Are you sure you want to permanently delete '${confirm.user.username}'? This action cannot be undone.`
+            : `Are you sure you want to ${confirm.user.is_active ? 'disable' : 'enable'} '${confirm.user.username}'?`}
+          confirmLabel={confirm.type === 'delete' ? 'Delete' : (confirm.user.is_active ? 'Disable' : 'Enable')}
+          confirmStyle={confirm.type === 'delete' ? 'danger' : 'warning'}
+          onConfirm={confirm.type === 'delete' ? handleDelete : handleToggle}
+          onCancel={() => setConfirm(null)}
+          loading={actionLoading === confirm.user.id}
+        />
+      )}
+
       {/* Search */}
       <div style={{ padding: '1rem 1rem 0', marginBottom: '0.75rem' }}>
         <div style={{ position: 'relative', maxWidth: 320 }}>
